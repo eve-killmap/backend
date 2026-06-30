@@ -104,6 +104,7 @@ async def lifespan(_app: FastAPI):
         invalidate_bus = None
         heartbeat_task = None
         invalidation_task = None
+    health.set_bus_redis(invalidate_bus)
     await broadcaster.start()
     yield
     await broadcaster.stop()

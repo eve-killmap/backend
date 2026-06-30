@@ -37,6 +37,38 @@ def test_redis_ok_false_when_unset(monkeypatch):
     assert asyncio.run(health.redis_ok()) is False
 
 
+class _FakeInfoRedis:
+    def __init__(self, info):
+        self._info = info
+
+    async def info(self):
+        return self._info
+
+
+def test_redis_info_reports_cache_and_stream():
+    health.set_redis(
+        _FakeInfoRedis({"used_memory": 100, "connected_clients": 2, "uptime_in_seconds": 30})
+    )
+    health.set_bus_redis(
+        _FakeInfoRedis({"used_memory": 200, "connected_clients": 5, "uptime_in_seconds": 60})
+    )
+    out = asyncio.run(health.redis_info())
+    assert out["cache"]["available"] is True
+    assert out["cache"]["used_memory"] == 100
+    assert out["stream"]["available"] is True
+    assert out["stream"]["connected_clients"] == 5
+
+
+def test_redis_info_stream_unavailable_when_unset():
+    health.set_redis(
+        _FakeInfoRedis({"used_memory": 1, "connected_clients": 1, "uptime_in_seconds": 1})
+    )
+    health.set_bus_redis(None)
+    out = asyncio.run(health.redis_info())
+    assert out["stream"] == {"available": False}
+    assert out["cache"]["available"] is True
+
+
 def test_health_token_ok():
     assert health_token_ok("secret", "secret") is True
     assert health_token_ok("nope", "secret") is False

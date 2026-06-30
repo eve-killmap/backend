@@ -16,11 +16,17 @@ logger = logging.getLogger(__name__)
 HEARTBEAT_PREFIX = "health:worker:"
 
 _redis: aioredis.Redis | None = None
+_bus_redis: aioredis.Redis | None = None
 
 
 def set_redis(redis: aioredis.Redis) -> None:
     global _redis
     _redis = redis
+
+
+def set_bus_redis(redis: aioredis.Redis | None) -> None:
+    global _bus_redis
+    _bus_redis = redis
 
 
 async def redis_ok() -> bool:
@@ -89,11 +95,11 @@ async def read_worker_heartbeats() -> list[dict]:
     return payloads
 
 
-async def redis_info() -> dict:
-    if _redis is None:
+async def _redis_info_for(client: aioredis.Redis | None) -> dict:
+    if client is None:
         return {"available": False}
     try:
-        info = await _redis.info()
+        info = await client.info()
         return {
             "available": True,
             "used_memory": info.get("used_memory"),
@@ -102,6 +108,13 @@ async def redis_info() -> dict:
         }
     except Exception as exc:
         return {"available": False, "error": str(exc)}
+
+
+async def redis_info() -> dict:
+    return {
+        "cache": await _redis_info_for(_redis),
+        "stream": await _redis_info_for(_bus_redis),
+    }
 
 
 def build_heartbeat(pid: int, snapshot: dict, now: float) -> dict:
