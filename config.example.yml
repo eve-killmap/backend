@@ -1,0 +1,70 @@
+# Copy this file to `config.yml` and edit as needed. Every value below is
+# optional: anything omitted falls back to the built-in defaults shown here,
+# so an empty or missing config.yml reproduces the original behavior.
+
+logging:
+  # One of: DEBUG, INFO, WARNING, ERROR, CRITICAL.
+  level: INFO
+  max_bytes: 10485760   # 10 MiB
+  backup_count: 5
+  # Optional log file path (relative paths resolve against the project root).
+  # Usually set via LOG_FILE in .env instead.
+  # file: backend.log
+
+cors:
+  # Allowed browser origins for the API. Accepts a YAML list or a comma-separated
+  # string.
+  allow_origins:
+    - http://127.0.0.1:3000
+    - http://localhost:3000
+  allow_methods:
+    - GET
+  allow_headers:
+    - "*"
+
+database:
+  # asyncpg connection pool sizing.
+  pool_min_size: 5
+  pool_max_size: 20
+
+cache:
+  # All values are TTLs in seconds for the Redis cache layer.
+  query_ttl: 300            # generic query response cache
+  binary_ttl: 60            # per-system binary kills payload (since=None)
+  type_name_ttl: 2592000    # DB type-name lookups (30 days)
+  esi_corp_ttl: 86400       # ESI corporation info (1 day)
+  esi_alliance_ttl: 86400   # ESI alliance info (1 day)
+  esi_name_ttl: 604800      # ESI character/type names (7 days)
+  esi_war_fallback_ttl: 21600   # war info when no Expires header (6h)
+  esi_sov_fallback_ttl: 3600    # sov map when no Expires header (1h)
+  rankings_ttl: 3600        # /stats/system-rankings response
+  sov_ttl: 3600             # /systems/{id}/sov response
+  farthest_kill_ttl: 21600  # /systems/{id}/farthest_kill response (6h)
+  kill_detail_ttl: 604800   # per-killmail raw detail (immutable; 7 days)
+  kill_detail_processed_ttl: 3600   # processed kill detail
+  system_latest_ttl: 10     # per-system MAX(inserted_time) short-circuit cache
+
+esi:
+  # When the war endpoint's remaining rate-limit tokens drop below this, skip
+  # opportunistic war fetches.
+  war_ratelimit_low_water: 200
+
+streaming:
+  # Cross-app contract names shared with process-kills. Do not change without
+  # updating process-kills in lockstep.
+  stream_name: kills:live          # Redis stream the backend tails
+  pubsub_channel: kills:enriched   # internal fan-out channel between workers
+  invalidate_channel: cache:invalidate   # cache-invalidation pub/sub
+
+health:
+  # Per-worker heartbeat interval and key TTL (seconds). TTL should be >= 2x interval.
+  heartbeat_interval: 10
+  heartbeat_ttl: 30
+  # Optional: if set, /health/detail flags "degraded" when fewer workers report.
+  # expected_workers: 4
+
+limits:
+  # Input caps to bound abuse / resource use.
+  max_killmail_ids: 100      # /kills/details/raw ids per request
+  max_name_ids: 100          # POST /universe/names ids per request
+  max_ws_connections: 1000   # per-process WebSocket connection cap
