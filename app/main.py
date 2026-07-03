@@ -142,6 +142,8 @@ async def _request_middleware(request, call_next):
     response = await call_next(request)
     for key, value in security_headers().items():
         response.headers.setdefault(key, value)
+    if "*" in config.cors.allow_origins:
+        response.headers.setdefault("Access-Control-Allow-Origin", "*")
     return response
 
 

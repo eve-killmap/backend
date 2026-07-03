@@ -24,5 +24,4 @@ def test_json_cache_response_304(monkeypatch):
     full = json_cache_response(body, max_age=60, if_none_match=None)
     assert full.status_code == 200
     assert full.headers["Cache-Control"] == "public, max-age=60"
-    assert full.headers["Vary"] == "Accept-Encoding"
     assert full.headers["ETag"] == etag

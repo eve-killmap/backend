@@ -17,7 +17,6 @@ def _headers(etag: str, max_age: int) -> dict[str, str]:
     return {
         "ETag": etag,
         "Cache-Control": f"public, max-age={max_age}",
-        "Vary": "Accept-Encoding",
     }
 
 
