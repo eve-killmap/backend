@@ -101,3 +101,28 @@ def test_leader_demotes_when_lock_stolen():
 
     assert b._is_leader is False
     assert shared.store[_LOCK_KEY] == "someone-else"  # not stolen back
+
+
+class _FakeStreamRedis:
+    def __init__(self, last_id=None, exc=None):
+        self._last_id = last_id
+        self._exc = exc
+
+    async def xinfo_stream(self, name):
+        if self._exc is not None:
+            raise self._exc
+        return {"last-generated-id": self._last_id}
+
+
+def test_resolve_start_id_uses_last_generated_id():
+    b = KillBroadcaster()
+    b._redis = _FakeStreamRedis(last_id="1720000000000-0")  # type: ignore[assignment]
+    assert asyncio.run(b._resolve_start_id()) == "1720000000000-0"
+
+
+def test_resolve_start_id_falls_back_when_stream_missing():
+    from redis.exceptions import ResponseError
+
+    b = KillBroadcaster()
+    b._redis = _FakeStreamRedis(exc=ResponseError("no such key"))  # type: ignore[assignment]
+    assert asyncio.run(b._resolve_start_id()) == "$"

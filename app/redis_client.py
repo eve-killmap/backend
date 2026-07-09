@@ -6,6 +6,11 @@ import uuid
 from typing import cast
 
 import redis.asyncio as aioredis
+from redis.exceptions import (
+    ConnectionError as RedisConnectionError,
+    ResponseError as RedisResponseError,
+    TimeoutError as RedisTimeoutError,
+)
 
 from app.config import config
 from app.metrics import metrics
@@ -187,7 +192,12 @@ class KillBroadcaster:
         if not config.redis_url:
             logger.warning("REDIS_URL not set; live kill streaming disabled")
             return
-        self._redis = aioredis.from_url(config.redis_url, decode_responses=True)
+        self._redis = aioredis.from_url(
+            config.redis_url,
+            decode_responses=True,
+            socket_keepalive=True,
+            health_check_interval=30,
+        )
         metrics.broadcaster_role = "follower"
         self._election_task = asyncio.create_task(self._election_loop())
         self._subscriber_task = asyncio.create_task(self._subscriber_loop())
@@ -220,9 +230,19 @@ class KillBroadcaster:
             await self._redis.aclose()
         logger.info("Kill broadcaster stopped")
 
+    async def _resolve_start_id(self) -> str:
+        assert self._redis is not None
+        try:
+            info = await self._redis.xinfo_stream(config.streaming.stream_name)
+            return str(info.get("last-generated-id", "$"))
+        except RedisResponseError:
+            return "$"  # stream does not exist yet
+        except (RedisTimeoutError, RedisConnectionError):
+            return "$"
+
     async def _leader_loop(self) -> None:
         assert self._redis is not None  # set in start() before task is created
-        last_id = "$"
+        last_id = await self._resolve_start_id()
         while True:
             try:
                 _raw = await self._redis.xread(
@@ -248,6 +268,11 @@ class KillBroadcaster:
                         )
             except asyncio.CancelledError:
                 raise
+            except (RedisTimeoutError, RedisConnectionError) as exc:
+                logger.debug(
+                    "Broadcaster leader read interrupted (%s); continuing", exc
+                )
+                await asyncio.sleep(0.5)
             except Exception as exc:
                 logger.warning("Broadcaster leader error: %s; retrying in 2s", exc)
                 await asyncio.sleep(2)
