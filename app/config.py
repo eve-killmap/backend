@@ -110,6 +110,13 @@ class Config:
     redis_url: str | None
     redis_cache_url: str | None
     health_token: str | None
+    worker_id: str | None
+
+
+def worker_log_file(path: Path, worker_id: str | None) -> Path:
+    if not worker_id:
+        return path
+    return path.with_name(f"{path.stem}.worker-{worker_id}{path.suffix}")
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
@@ -187,6 +194,9 @@ def load_config(
     log_file = Path(env.get("LOG_FILE") or log_cfg.get("file") or "backend.log")
     if not log_file.is_absolute():
         log_file = base_dir / log_file
+
+    worker_id = env.get("WORKER_ID") or None
+    log_file = worker_log_file(log_file, worker_id)
 
     logging_config = LoggingConfig(
         level=level,
@@ -336,6 +346,7 @@ def load_config(
         redis_url=env.get("REDIS_URL") or None,
         redis_cache_url=env.get("REDIS_CACHE_URL") or None,
         health_token=env.get("HEALTH_TOKEN") or None,
+        worker_id=worker_id,
     )
 
 
@@ -355,9 +366,11 @@ def setup_logging(config: Config) -> None:
         root_logger.removeHandler(handler)
         handler.close()
 
-    formatter = logging.Formatter(
-        "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"
-    )
+    if config.worker_id:
+        fmt = f"[%(asctime)s] [worker {config.worker_id}] [%(levelname)s] [%(name)s] %(message)s"
+    else:
+        fmt = "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"
+    formatter = logging.Formatter(fmt)
 
     config.logging.file.parent.mkdir(parents=True, exist_ok=True)
     file_handler = RotatingFileHandler(

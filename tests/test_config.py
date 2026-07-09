@@ -2,13 +2,41 @@ from pathlib import Path
 
 import pytest
 
-from app.config import ConfigError, load_config, require_database_url
+from app.config import ConfigError, load_config, require_database_url, worker_log_file
 
 
 def _write_yaml(tmp_path: Path, text: str) -> Path:
     p = tmp_path / "config.yml"
     p.write_text(text, encoding="utf-8")
     return p
+
+
+def test_worker_log_file_unchanged_without_id():
+    p = Path("/var/log/backend.log")
+    assert worker_log_file(p, None) == p
+    assert worker_log_file(p, "") == p
+
+
+def test_worker_log_file_inserts_id():
+    assert worker_log_file(Path("/var/log/backend.log"), "2") == Path(
+        "/var/log/backend.worker-2.log"
+    )
+
+
+def test_worker_id_derives_per_worker_file(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"WORKER_ID": "3", "LOG_FILE": "backend.log"},
+        base_dir=tmp_path,
+    )
+    assert cfg.worker_id == "3"
+    assert cfg.logging.file == tmp_path / "backend.worker-3.log"
+
+
+def test_no_worker_id_by_default(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.worker_id is None
+    assert cfg.logging.file == tmp_path / "backend.log"
 
 
 def test_defaults_reproduce_behavior(tmp_path):
