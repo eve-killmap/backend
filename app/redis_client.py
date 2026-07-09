@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from typing import cast
 
 import redis.asyncio as aioredis
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 _LOCK_KEY = "kills:broadcaster:leader"
 _LOCK_TTL = 30
-_RENEWAL_INTERVAL = 10
+_ELECTION_INTERVAL = 10
 
 _RENEW_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -177,53 +178,44 @@ class KillBroadcaster:
         self._redis: aioredis.Redis | None = None
         self._subscriber_task: asyncio.Task | None = None
         self._leader_task: asyncio.Task | None = None
-        self._renewal_task: asyncio.Task | None = None
         self._sov_task: asyncio.Task | None = None
+        self._election_task: asyncio.Task | None = None
         self._is_leader: bool = False
+        self._instance_id: str = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
     async def start(self) -> None:
         if not config.redis_url:
             logger.warning("REDIS_URL not set; live kill streaming disabled")
             return
         self._redis = aioredis.from_url(config.redis_url, decode_responses=True)
-
-        my_pid = str(os.getpid())
-        acquired = await self._redis.set(_LOCK_KEY, my_pid, nx=True, ex=_LOCK_TTL)
-        if acquired:
-            self._is_leader = True
-            logger.info("Broadcaster: acquired leader lock (pid=%s)", my_pid)
-            self._leader_task = asyncio.create_task(self._leader_loop())
-            self._renewal_task = asyncio.create_task(self._lock_renewal_loop())
-            self._sov_task = asyncio.create_task(self._sov_refresh_loop())
-            metrics.broadcaster_role = "leader"
-        else:
-            logger.info("Broadcaster: follower mode (pid=%s)", my_pid)
-            metrics.broadcaster_role = "follower"
-
+        metrics.broadcaster_role = "follower"
+        self._election_task = asyncio.create_task(self._election_loop())
         self._subscriber_task = asyncio.create_task(self._subscriber_loop())
-        logger.info("Kill broadcaster started")
+        logger.info("Kill broadcaster started (instance=%s)", self._instance_id)
 
     async def stop(self) -> None:
-        for task in (
-            self._leader_task,
-            self._renewal_task,
-            self._sov_task,
-            self._subscriber_task,
-        ):
-            if task:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+        if self._election_task:
+            self._election_task.cancel()
+            try:
+                await self._election_task
+            except asyncio.CancelledError:
+                pass
+            self._election_task = None
+        await self._cancel_leader_tasks()
+        if self._subscriber_task:
+            self._subscriber_task.cancel()
+            try:
+                await self._subscriber_task
+            except asyncio.CancelledError:
+                pass
         if self._is_leader and self._redis:
             try:
-                my_pid = str(os.getpid())
                 current = await self._redis.get(_LOCK_KEY)
-                if current == my_pid:
+                if current == self._instance_id:
                     await self._redis.delete(_LOCK_KEY)
             except Exception:
                 pass
+            self._is_leader = False
         if self._redis:
             await self._redis.aclose()
         logger.info("Kill broadcaster stopped")
@@ -260,26 +252,62 @@ class KillBroadcaster:
                 logger.warning("Broadcaster leader error: %s; retrying in 2s", exc)
                 await asyncio.sleep(2)
 
-    async def _lock_renewal_loop(self) -> None:
+    async def _election_loop(self) -> None:
         assert self._redis is not None  # set in start() before task is created
-        my_pid = str(os.getpid())
         while True:
-            await asyncio.sleep(_RENEWAL_INTERVAL)
             try:
-                renewed = await self._redis.eval(
-                    _RENEW_SCRIPT, 1, _LOCK_KEY, my_pid, str(_LOCK_TTL)
-                )
-                if not renewed:
-                    logger.warning(
-                        "Broadcaster: lost leader lock; stopping leader tasks"
-                    )
-                    if self._leader_task:
-                        self._leader_task.cancel()
-                    return
+                await self._election_step()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning("Broadcaster: lock renewal error: %s", exc)
+                logger.warning("Broadcaster election error: %s", exc)
+            await asyncio.sleep(_ELECTION_INTERVAL)
+
+    async def _election_step(self) -> None:
+        assert self._redis is not None
+        if self._is_leader:
+            renewed = await self._redis.eval(
+                _RENEW_SCRIPT, 1, _LOCK_KEY, self._instance_id, str(_LOCK_TTL)
+            )
+            if not renewed:
+                await self._demote()
+        if not self._is_leader:
+            acquired = await self._redis.set(
+                _LOCK_KEY, self._instance_id, nx=True, ex=_LOCK_TTL
+            )
+            if acquired:
+                await self._promote()
+
+    async def _promote(self) -> None:
+        if self._is_leader:
+            return
+        self._is_leader = True
+        metrics.broadcaster_role = "leader"
+        logger.info("Broadcaster: promoted to leader (instance=%s)", self._instance_id)
+        self._leader_task = asyncio.create_task(self._leader_loop())
+        self._sov_task = asyncio.create_task(self._sov_refresh_loop())
+
+    async def _demote(self) -> None:
+        if not self._is_leader:
+            return
+        self._is_leader = False
+        metrics.broadcaster_role = "follower"
+        logger.warning(
+            "Broadcaster: lost leader lock; demoted to follower (instance=%s)",
+            self._instance_id,
+        )
+        await self._cancel_leader_tasks()
+
+    async def _cancel_leader_tasks(self) -> None:
+        for task in (self._leader_task, self._sov_task):
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._leader_task = None
+        self._sov_task = None
 
     async def _sov_refresh_loop(self) -> None:
         cap = 3600
