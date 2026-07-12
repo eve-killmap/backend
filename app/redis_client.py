@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from typing import cast
 
@@ -14,6 +15,7 @@ from redis.exceptions import (
 
 from app.config import config
 from app.metrics import metrics
+from app import prometheus_metrics as pm
 from app.esi import esi_client
 from app.queries import get_type_names
 from app.timeparse import iso_to_epoch
@@ -199,6 +201,7 @@ class KillBroadcaster:
             health_check_interval=30,
         )
         metrics.broadcaster_role = "follower"
+        pm.broadcaster_is_leader.set(0)
         self._election_task = asyncio.create_task(self._election_loop())
         self._subscriber_task = asyncio.create_task(self._subscriber_loop())
         logger.info("Kill broadcaster started (instance=%s)", self._instance_id)
@@ -256,6 +259,14 @@ class KillBroadcaster:
                 for _, entries in results:
                     for entry_id, fields in entries:
                         last_id = entry_id
+                        pm.stream_entries_read.inc()
+                        try:
+                            _ms = int(entry_id.split("-")[0])
+                            pm.stream_consumer_lag_seconds.set(
+                                max(time.time() - _ms / 1000.0, 0.0)
+                            )
+                        except (ValueError, IndexError):
+                            pass
                         try:
                             payload = await _parse_kill(json.loads(fields["data"]))
                         except Exception as exc:
@@ -266,14 +277,17 @@ class KillBroadcaster:
                         await self._redis.publish(
                             config.streaming.pubsub_channel, json.dumps(payload)
                         )
+                        pm.live_events_pushed.inc()
             except asyncio.CancelledError:
                 raise
             except (RedisTimeoutError, RedisConnectionError) as exc:
+                pm.stream_read_interruptions.inc()
                 logger.debug(
                     "Broadcaster leader read interrupted (%s); continuing", exc
                 )
                 await asyncio.sleep(0.5)
             except Exception as exc:
+                pm.errors.labels(component="broadcaster").inc()
                 logger.warning("Broadcaster leader error: %s; retrying in 2s", exc)
                 await asyncio.sleep(2)
 
@@ -285,6 +299,7 @@ class KillBroadcaster:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                pm.errors.labels(component="broadcaster").inc()
                 logger.warning("Broadcaster election error: %s", exc)
             await asyncio.sleep(_ELECTION_INTERVAL)
 
@@ -308,6 +323,8 @@ class KillBroadcaster:
             return
         self._is_leader = True
         metrics.broadcaster_role = "leader"
+        pm.broadcaster_is_leader.set(1)
+        pm.leader_promotions.inc()
         logger.info("Broadcaster: promoted to leader (instance=%s)", self._instance_id)
         self._leader_task = asyncio.create_task(self._leader_loop())
         self._sov_task = asyncio.create_task(self._sov_refresh_loop())
@@ -317,6 +334,7 @@ class KillBroadcaster:
             return
         self._is_leader = False
         metrics.broadcaster_role = "follower"
+        pm.broadcaster_is_leader.set(0)
         logger.warning(
             "Broadcaster: lost leader lock; demoted to follower (instance=%s)",
             self._instance_id,
@@ -344,11 +362,14 @@ class KillBroadcaster:
                         config.streaming.invalidate_channel,
                         json.dumps({"targets": ["sov"]}),
                     )
+                pm.sov_refreshes.labels(outcome="ok").inc()
                 logger.info("Sov map refreshed (ttl=%ss)", ttl)
                 await asyncio.sleep(min(max(ttl - 60, 60), cap))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                pm.sov_refreshes.labels(outcome="error").inc()
+                pm.errors.labels(component="broadcaster").inc()
                 logger.warning("Sov refresh failed: %s; retrying in 60s", exc)
                 await asyncio.sleep(60)
 
@@ -369,6 +390,7 @@ class KillBroadcaster:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            pm.errors.labels(component="broadcaster").inc()
             logger.warning("Broadcaster: subscriber error: %s; retrying in 2s", exc)
             await asyncio.sleep(2)
         finally:
@@ -389,6 +411,7 @@ class KillBroadcaster:
                 q.put_nowait(global_payload)
             except asyncio.QueueFull:
                 dead.add(q)
+                pm.ws_messages_dropped.inc()
         self._global_subs -= dead
 
         dead = set()
@@ -397,6 +420,7 @@ class KillBroadcaster:
                 q.put_nowait(system_payload)
             except asyncio.QueueFull:
                 dead.add(q)
+                pm.ws_messages_dropped.inc()
         if system_id in self._system_subs:
             self._system_subs[system_id] -= dead
 
@@ -408,6 +432,7 @@ class KillBroadcaster:
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
         self._global_subs.add(q)
         metrics.ws_global_connections += 1
+        pm.live_clients.labels(transport="ws").inc()
         return q
 
     def unsubscribe_global(self, q: asyncio.Queue) -> None:
@@ -415,18 +440,21 @@ class KillBroadcaster:
         self._global_subs.discard(q)
         if removed:
             metrics.ws_global_connections -= 1
+            pm.live_clients.labels(transport="ws").dec()
 
     def subscribe_system(self, system_id: int) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
         self._system_subs.setdefault(system_id, set()).add(q)
         metrics.ws_system_connections += 1
+        pm.live_clients.labels(transport="ws").inc()
         return q
 
     def unsubscribe_system(self, system_id: int, q: asyncio.Queue) -> None:
         subs = self._system_subs.get(system_id)
-        if subs:
+        if subs and q in subs:
             subs.discard(q)
             metrics.ws_system_connections -= 1
+            pm.live_clients.labels(transport="ws").dec()
             if not subs:
                 del self._system_subs[system_id]
 

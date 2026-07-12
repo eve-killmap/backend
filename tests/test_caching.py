@@ -81,3 +81,75 @@ def test_merge_kill_details_counts():
     assert isinstance(resp, RawKillDetailResponse)
     assert resp.count == 2
     assert {k.killmail_id for k in resp.kills} == {1, 2}
+
+
+import app.prometheus_metrics as pm  # noqa: E402
+from prometheus_client import REGISTRY  # noqa: E402
+
+
+def _sample(name, labels=None):
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+class _FakeRedisGet:
+    def __init__(self, value):
+        self._value = value
+
+    async def get(self, key):
+        return self._value
+
+
+def test_query_cache_hit_and_miss_metrics():
+    from app.cache import QueryCache
+
+    hit = QueryCache(); hit.set_redis(_FakeRedisGet("cached"))
+    miss = QueryCache(); miss.set_redis(_FakeRedisGet(None))
+
+    h0 = _sample("eve_killmap_cache_hits_total", {"cache": "sov"})
+    m0 = _sample("eve_killmap_cache_misses_total", {"cache": "sov"})
+    g0 = _sample("eve_killmap_redis_command_seconds_count", {"op": "get"})
+
+    asyncio.run(hit.get("sov", {"a": 1}))
+    asyncio.run(miss.get("sov", {"a": 2}))
+
+    assert _sample("eve_killmap_cache_hits_total", {"cache": "sov"}) - h0 == 1
+    assert _sample("eve_killmap_cache_misses_total", {"cache": "sov"}) - m0 == 1
+    assert _sample("eve_killmap_redis_command_seconds_count", {"op": "get"}) - g0 == 2
+
+
+class _FakeRedisSet:
+    async def set(self, *a, **k):
+        return True
+
+
+def test_query_cache_set_times_op():
+    from app.cache import QueryCache
+
+    qc = QueryCache(); qc.set_redis(_FakeRedisSet())
+    s0 = _sample("eve_killmap_redis_command_seconds_count", {"op": "set"})
+    asyncio.run(qc.set("sov", {"a": 1}, "value", ttl=10))
+    assert _sample("eve_killmap_redis_command_seconds_count", {"op": "set"}) - s0 == 1
+
+
+def test_binary_cache_uses_binary_label():
+    from app.cache import KillsBinaryCache
+
+    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisGet(None))
+    m0 = _sample("eve_killmap_cache_misses_total", {"cache": "binary"})
+    asyncio.run(kbc.get({"a": 1}))
+    assert _sample("eve_killmap_cache_misses_total", {"cache": "binary"}) - m0 == 1
+
+
+def test_esi_corp_cache_hit_metric():
+    from app.esi import EsiClient
+    import json as _json
+
+    client = EsiClient()
+    client._redis = _FakeRedisGet(_json.dumps(["CorpName", "TICK"]))  # type: ignore[attr-defined]
+    h0 = _sample("eve_killmap_esi_cache_hits_total", {"entity": "corporation"})
+    result = asyncio.run(client.get_corporation_info(123))
+    assert result == ("CorpName", "TICK")
+    assert (
+        _sample("eve_killmap_esi_cache_hits_total", {"entity": "corporation"}) - h0
+        == 1
+    )

@@ -106,3 +106,30 @@ def test_subscriber_skips_malformed_message():
 
     assert cache.deleted == []
     assert pubsub.closed is True
+
+
+import app.prometheus_metrics as pm  # noqa: E402
+from prometheus_client import REGISTRY  # noqa: E402
+
+
+def _sample(name, labels=None):
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+def test_subscriber_records_received_and_evicted_metrics():
+    msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:sov:a", "query:sov:b"])
+
+    r0 = _sample("eve_killmap_cache_invalidations_received_total", {"target": "sov"})
+    e0 = _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"})
+
+    asyncio.run(invalidation.subscriber_loop(_FakeBus(pubsub), cache, "cache:invalidate"))
+
+    assert (
+        _sample("eve_killmap_cache_invalidations_received_total", {"target": "sov"}) - r0
+        == 1
+    )
+    assert (
+        _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"}) - e0 == 2
+    )

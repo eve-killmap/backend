@@ -6,6 +6,8 @@ import logging
 
 import redis.asyncio as aioredis
 
+from app import prometheus_metrics as pm
+
 logger = logging.getLogger(__name__)
 
 INVALIDATION_PATTERNS = {
@@ -54,11 +56,17 @@ async def subscriber_loop(
             except (json.JSONDecodeError, AttributeError) as exc:
                 logger.warning("Bad invalidation message: %s", exc)
                 continue
-            for pattern in patterns_for_targets(targets):
+            for target in targets:
+                pattern = INVALIDATION_PATTERNS.get(target)
+                if pattern is None:
+                    continue
+                pm.cache_invalidations_received.labels(target=target).inc()
                 try:
                     n = await _delete_pattern(cache, pattern)
+                    pm.cache_keys_evicted.labels(target=target).inc(n)
                     logger.debug("Invalidated %s key(s) for %s", n, pattern)
                 except Exception as exc:
+                    pm.errors.labels(component="invalidation").inc()
                     logger.warning(
                         "Invalidation delete failed for %s: %s", pattern, exc
                     )

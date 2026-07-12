@@ -15,6 +15,8 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = BASE_DIR / "config.yml"
 
+SERVICE_VERSION = "1.0.0"
+
 VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 # Generic, PII-free default. Operators MUST override USER_AGENT in .env with a
@@ -96,6 +98,13 @@ class LimitsConfig:
 
 
 @dataclass(frozen=True)
+class MetricsConfig:
+    enabled: bool
+    host: str
+    port: int
+
+
+@dataclass(frozen=True)
 class Config:
     logging: LoggingConfig
     cors: CorsConfig
@@ -105,6 +114,7 @@ class Config:
     streaming: StreamingConfig
     health: HealthConfig
     limits: LimitsConfig
+    metrics: MetricsConfig
     user_agent: str
     database_url: str | None
     redis_url: str | None
@@ -184,6 +194,7 @@ def load_config(
     stream_cfg = _section(data, "streaming")
     health_cfg = _section(data, "health")
     limits_cfg = _section(data, "limits")
+    metrics_cfg = _section(data, "metrics")
 
     level = (env.get("LOG_LEVEL") or log_cfg.get("level") or "INFO").upper()
     if level not in VALID_LOG_LEVELS:
@@ -332,6 +343,30 @@ def load_config(
         ),
     )
 
+    metrics_enabled = metrics_cfg.get("enabled", False)
+    if not isinstance(metrics_enabled, bool):
+        raise ConfigError("Config value 'metrics.enabled' must be a boolean")
+
+    metrics_host = metrics_cfg.get("host") or "127.0.0.1"
+
+    metrics_port_env = env.get("METRICS_PORT")
+    if metrics_port_env:
+        try:
+            metrics_port_value: Any = int(metrics_port_env)
+        except ValueError:
+            raise ConfigError(
+                f"METRICS_PORT must be an integer, got {metrics_port_env!r}"
+            )
+    else:
+        metrics_port_value = metrics_cfg.get("port", 9109)
+    metrics_port = _as_int(
+        metrics_port_value, "metrics.port", minimum=1, maximum=65535
+    )
+
+    metrics_config = MetricsConfig(
+        enabled=metrics_enabled, host=metrics_host, port=metrics_port
+    )
+
     return Config(
         logging=logging_config,
         cors=cors_config,
@@ -341,6 +376,7 @@ def load_config(
         streaming=streaming_config,
         health=health_config,
         limits=limits_config,
+        metrics=metrics_config,
         user_agent=env.get("USER_AGENT") or _DEFAULT_USER_AGENT,
         database_url=env.get("DATABASE_URL") or None,
         redis_url=env.get("REDIS_URL") or None,

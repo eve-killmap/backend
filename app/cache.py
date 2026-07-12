@@ -1,11 +1,13 @@
 import asyncio
 import hashlib
 import json
+import time
 
 import redis.asyncio as aioredis
 
 from app.config import config
 from app.metrics import metrics
+from app import prometheus_metrics as pm
 
 
 def _hash_params(params: dict) -> str:
@@ -26,11 +28,15 @@ class QueryCache:
     async def get(self, prefix: str, params: dict) -> str | None:
         if self._redis is None:
             return None
+        _start = time.perf_counter()
         value = await self._redis.get(f"query:{prefix}:{_hash_params(params)}")
+        pm.redis_command_seconds.labels(op="get").observe(time.perf_counter() - _start)
         if value is None:
             metrics.cache_misses += 1
+            pm.cache_misses.labels(cache=prefix).inc()
         else:
             metrics.cache_hits += 1
+            pm.cache_hits.labels(cache=prefix).inc()
         # Redis may return bytes when decode_responses=False; normalise to str.
         return value.decode() if isinstance(value, bytes) else value
 
@@ -40,7 +46,9 @@ class QueryCache:
         if self._redis is None:
             return
         ttl = config.cache.query_ttl if ttl is None else ttl
+        _start = time.perf_counter()
         await self._redis.set(f"query:{prefix}:{_hash_params(params)}", value, ex=ttl)
+        pm.redis_command_seconds.labels(op="set").observe(time.perf_counter() - _start)
 
 
 class KillsBinaryCache:
@@ -55,20 +63,26 @@ class KillsBinaryCache:
     async def get(self, params: dict) -> bytes | None:
         if self._redis is None:
             return None
+        _start = time.perf_counter()
         val = await self._redis.get(f"kills:binary:{_hash_params(params)}")
+        pm.redis_command_seconds.labels(op="get").observe(time.perf_counter() - _start)
         if val is None:
             metrics.cache_misses += 1
+            pm.cache_misses.labels(cache="binary").inc()
             return None
         metrics.cache_hits += 1
+        pm.cache_hits.labels(cache="binary").inc()
         # Redis may return str when decode_responses=True; normalise to bytes.
         return val.encode() if isinstance(val, str) else val
 
     async def set(self, params: dict, value: bytes) -> None:
         if self._redis is None:
             return
+        _start = time.perf_counter()
         await self._redis.set(
             f"kills:binary:{_hash_params(params)}", value, ex=config.cache.binary_ttl
         )
+        pm.redis_command_seconds.labels(op="set").observe(time.perf_counter() - _start)
 
 
 class SingleFlight:

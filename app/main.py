@@ -26,6 +26,7 @@ from app.http_cache import json_cache_response, binary_cache_response
 from app.binary_encoder import encode_kills_binary
 from app.esi import esi_client, EsiNotFoundError, EsiRateLimitError
 from app.redis_client import broadcaster
+from app import prometheus_metrics
 import app.queries as queries
 import app.invalidation as invalidation
 from app.timeparse import iso_to_epoch
@@ -105,6 +106,7 @@ async def lifespan(_app: FastAPI):
         heartbeat_task = None
         invalidation_task = None
     health.set_bus_redis(invalidate_bus)
+    prometheus_metrics.start_exporter(config)
     await broadcaster.start()
     yield
     await broadcaster.stop()
@@ -155,6 +157,9 @@ app.add_middleware(
     allow_methods=config.cors.allow_methods,
     allow_headers=config.cors.allow_headers,
 )
+
+if config.metrics.enabled:
+    prometheus_metrics.instrument_app(app)
 
 
 def _parse_killmail_ids(killmail_ids_str: str) -> list[int]:
@@ -490,8 +495,11 @@ async def get_system_kills(
     if since is not None:
         latest = await get_system_latest(solar_system_id)
         if should_short_circuit(since, latest):
+            prometheus_metrics.since_short_circuits.inc()
+            payload = encode_kills_binary([], [], [], [], [], [])
+            prometheus_metrics.kills_binary_response_bytes.observe(len(payload))
             return Response(
-                content=encode_kills_binary([], [], [], [], [], []),
+                content=payload,
                 media_type="application/octet-stream",
             )
 
@@ -508,6 +516,7 @@ async def get_system_kills(
             ship_types=result["ship_types"],
         )
         await kills_binary_cache.set(cache_params, cached)
+    prometheus_metrics.kills_binary_response_bytes.observe(len(cached))
     if since is None:
         return binary_cache_response(
             cached, max_age=config.cache.binary_ttl, if_none_match=if_none_match
@@ -692,16 +701,26 @@ async def _ws_guard(websocket: WebSocket) -> bool:
     if not origin_allowed(origin, config.cors.allow_origins):
         await websocket.accept()
         await websocket.close(code=1008, reason="Origin not allowed")
+        prometheus_metrics.ws_connections.labels(
+            transport="ws", outcome="rejected_origin"
+        ).inc()
         return False
     current = metrics.ws_global_connections + metrics.ws_system_connections
     if at_capacity(current, config.limits.max_ws_connections):
         await websocket.accept()
         await websocket.close(code=1013, reason="Server at capacity")
+        prometheus_metrics.ws_connections.labels(
+            transport="ws", outcome="rejected_capacity"
+        ).inc()
         return False
     if not broadcaster.is_running:
         await websocket.accept()
         await websocket.close(code=1011, reason="Live kill streaming unavailable")
+        prometheus_metrics.ws_connections.labels(
+            transport="ws", outcome="unavailable"
+        ).inc()
         return False
+    prometheus_metrics.ws_connections.labels(transport="ws", outcome="accepted").inc()
     return True
 
 

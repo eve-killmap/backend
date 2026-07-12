@@ -130,3 +130,64 @@ def test_require_database_url(tmp_path):
         base_dir=tmp_path,
     )
     assert require_database_url(cfg2) == "postgresql://u:p@h/d"
+
+
+def test_metrics_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.metrics.enabled is False
+    assert cfg.metrics.host == "127.0.0.1"
+    assert cfg.metrics.port == 9109
+
+
+def test_metrics_port_env_override(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml", env={"METRICS_PORT": "9101"}, base_dir=tmp_path
+    )
+    assert cfg.metrics.port == 9101  # coerced str -> int
+
+
+def test_metrics_port_yaml(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "metrics:\n  port: 9200\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.metrics.port == 9200
+
+
+def test_metrics_env_beats_yaml(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "metrics:\n  port: 9200\n")
+    cfg = load_config(
+        yaml_path=yaml_path, env={"METRICS_PORT": "9102"}, base_dir=tmp_path
+    )
+    assert cfg.metrics.port == 9102
+
+
+def test_metrics_enabled_and_host_from_yaml(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path, "metrics:\n  enabled: true\n  host: 10.0.0.5\n"
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.metrics.enabled is True
+    assert cfg.metrics.host == "10.0.0.5"
+
+
+def test_metrics_port_invalid_env_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(
+            yaml_path=tmp_path / "x.yml",
+            env={"METRICS_PORT": "not-a-port"},
+            base_dir=tmp_path,
+        )
+
+
+def test_metrics_port_out_of_range_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(
+            yaml_path=tmp_path / "x.yml",
+            env={"METRICS_PORT": "70000"},
+            base_dir=tmp_path,
+        )
+
+
+def test_metrics_enabled_not_bool_raises(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "metrics:\n  enabled: yes-please\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)

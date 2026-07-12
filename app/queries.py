@@ -7,6 +7,7 @@ import redis.asyncio as aioredis
 from app.config import config
 from app.database import db
 from app.schema import RawKillsColumns
+from app import prometheus_metrics as pm
 from app.models import (
     RawKillDetailResponse,
     Attacker,
@@ -362,8 +363,10 @@ async def get_kill_details_cached(killmail_ids: list[int]) -> RawKillDetailRespo
         for kid, raw in zip(killmail_ids, cached_values):
             if raw is not None:
                 found.append(KillDetail.model_validate_json(raw))
+                pm.cache_hits.labels(cache="kill_details").inc()
             else:
                 misses.append(kid)
+                pm.cache_misses.labels(cache="kill_details").inc()
 
     if misses:
         fetched = await fetch_kills_by_ids(misses)
@@ -396,8 +399,10 @@ async def get_type_names(ids: set[int]) -> dict[int, str]:
             if val is not None:
                 # mget may return bytes when decode_responses=False; normalise.
                 result[type_id] = val.decode() if isinstance(val, bytes) else val
+                pm.cache_hits.labels(cache="type_name").inc()
             else:
                 uncached.append(type_id)
+                pm.cache_misses.labels(cache="type_name").inc()
     else:
         uncached = list(ids)
 

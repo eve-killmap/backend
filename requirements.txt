@@ -8,3 +8,5 @@ redis==8.0.1
 websockets==16.0
 PyYAML==6.0.3
 python-dotenv==1.2.2
+prometheus-client==0.25.0
+prometheus-fastapi-instrumentator==8.0.2

@@ -8,6 +8,7 @@ import aiohttp
 import redis.asyncio as aioredis
 
 from app.config import config
+from app import prometheus_metrics as pm
 
 ESI_BASE = "https://esi.evetech.net/latest"
 
@@ -60,9 +61,12 @@ class EsiClient:
         if self._redis is not None:
             cached = await self._redis.get(f"esi:corp:{corporation_id}")
             if cached is not None:
+                pm.esi_cache_hits.labels(entity="corporation").inc()
                 return tuple(json.loads(cached))  # type: ignore[return-value]
+            pm.esi_cache_misses.labels(entity="corporation").inc()
 
         session = await self._get_session()
+        _start = time.perf_counter()
         try:
             async with session.get(
                 f"{ESI_BASE}/corporations/{corporation_id}/"
@@ -70,9 +74,16 @@ class EsiClient:
                 resp.raise_for_status()
                 data = await resp.json()
         except aiohttp.ClientError as exc:
+            pm.esi_requests.labels(endpoint="corporation", outcome="error").inc()
+            pm.errors.labels(component="esi").inc()
             raise RuntimeError(
                 f"ESI corporations/{corporation_id} request failed: {exc!r}"
             ) from exc
+        finally:
+            pm.esi_request_seconds.labels(endpoint="corporation").observe(
+                time.perf_counter() - _start
+            )
+        pm.esi_requests.labels(endpoint="corporation", outcome="ok").inc()
 
         result = (data["name"], data["ticker"])
         if self._redis is not None:
@@ -88,17 +99,27 @@ class EsiClient:
         if self._redis is not None:
             cached = await self._redis.get(f"esi:alliance:{alliance_id}")
             if cached is not None:
+                pm.esi_cache_hits.labels(entity="alliance").inc()
                 return tuple(json.loads(cached))  # type: ignore[return-value]
+            pm.esi_cache_misses.labels(entity="alliance").inc()
 
         session = await self._get_session()
+        _start = time.perf_counter()
         try:
             async with session.get(f"{ESI_BASE}/alliances/{alliance_id}/") as resp:
                 resp.raise_for_status()
                 data = await resp.json()
         except aiohttp.ClientError as exc:
+            pm.esi_requests.labels(endpoint="alliance", outcome="error").inc()
+            pm.errors.labels(component="esi").inc()
             raise RuntimeError(
                 f"ESI alliances/{alliance_id} request failed: {exc!r}"
             ) from exc
+        finally:
+            pm.esi_request_seconds.labels(endpoint="alliance").observe(
+                time.perf_counter() - _start
+            )
+        pm.esi_requests.labels(endpoint="alliance", outcome="ok").inc()
 
         result = (data["name"], data["ticker"])
         if self._redis is not None:
@@ -124,8 +145,10 @@ class EsiClient:
                 if val is not None:
                     # mget may return bytes when decode_responses=False; normalise.
                     result[entity_id] = val.decode() if isinstance(val, bytes) else val
+                    pm.esi_cache_hits.labels(entity="character").inc()
                 else:
                     uncached.append(entity_id)
+                    pm.esi_cache_misses.labels(entity="character").inc()
         else:
             uncached = list(ids)
 
@@ -135,11 +158,15 @@ class EsiClient:
         session = await self._get_session()
         for i in range(0, len(uncached), 1000):
             batch = uncached[i : i + 1000]
+            _start = time.perf_counter()
             try:
                 async with session.post(
                     f"{ESI_BASE}/universe/names/", json=batch
                 ) as resp:
                     if resp.status == 404:
+                        pm.esi_requests.labels(
+                            endpoint="names", outcome="not_found"
+                        ).inc()
                         try:
                             body = await resp.json()
                             esi_msg = body.get("error", str(batch))
@@ -153,9 +180,16 @@ class EsiClient:
             except EsiNotFoundError:
                 raise
             except aiohttp.ClientError as exc:
+                pm.esi_requests.labels(endpoint="names", outcome="error").inc()
+                pm.errors.labels(component="esi").inc()
                 raise RuntimeError(
                     f"ESI universe/names request failed: {exc!r}"
                 ) from exc
+            finally:
+                pm.esi_request_seconds.labels(endpoint="names").observe(
+                    time.perf_counter() - _start
+                )
+            pm.esi_requests.labels(endpoint="names", outcome="ok").inc()
 
             if self._redis is not None:
                 pipe = self._redis.pipeline()
@@ -176,7 +210,9 @@ class EsiClient:
         if self._redis is not None:
             cached = await self._redis.get(f"esi:war:{war_id}")
             if cached is not None:
+                pm.esi_cache_hits.labels(entity="war").inc()
                 return json.loads(cached)
+            pm.esi_cache_misses.labels(entity="war").inc()
 
         if self._redis is not None:
             blocked_until_raw, remaining_raw = await asyncio.gather(
@@ -198,19 +234,23 @@ class EsiClient:
                     )
 
         session = await self._get_session()
+        _start = time.perf_counter()
         try:
             async with session.get(f"{ESI_BASE}/wars/{war_id}/") as resp:
                 remaining_header = resp.headers.get("X-Ratelimit-Remaining")
                 if remaining_header is not None and self._redis is not None:
                     try:
+                        remaining_tokens = int(float(remaining_header))
+                        pm.esi_rate_limit_tokens.set(remaining_tokens)
                         await self._redis.set(
                             "esi:ratelimit:war:remaining",
-                            str(int(float(remaining_header))),
+                            str(remaining_tokens),
                         )
                     except ValueError:
                         pass
 
                 if resp.status == 429:
+                    pm.esi_requests.labels(endpoint="war", outcome="rate_limited").inc()
                     retry_after = resp.headers.get("Retry-After", "60")
                     if self._redis is not None:
                         try:
@@ -228,16 +268,24 @@ class EsiClient:
                     )
 
                 if resp.status == 404:
+                    pm.esi_requests.labels(endpoint="war", outcome="not_found").inc()
                     raise EsiNotFoundError(f"War {war_id} not found")
 
                 resp.raise_for_status()
                 data = await resp.json()
                 expires_header = resp.headers.get("Expires")
+                pm.esi_requests.labels(endpoint="war", outcome="ok").inc()
 
         except (EsiRateLimitError, EsiNotFoundError):
             raise
         except aiohttp.ClientError as exc:
+            pm.esi_requests.labels(endpoint="war", outcome="error").inc()
+            pm.errors.labels(component="esi").inc()
             raise RuntimeError(f"ESI wars/{war_id} request failed: {exc!r}") from exc
+        finally:
+            pm.esi_request_seconds.labels(endpoint="war").observe(
+                time.perf_counter() - _start
+            )
 
         if self._redis is not None:
             ttl = ttl_from_expires(
@@ -248,13 +296,21 @@ class EsiClient:
 
     async def _fetch_sov_map(self) -> tuple[dict[int, dict], str | None]:
         session = await self._get_session()
+        _start = time.perf_counter()
         try:
             async with session.get(f"{ESI_BASE}/sovereignty/map/") as resp:
                 resp.raise_for_status()
                 data = await resp.json()
                 expires_header = resp.headers.get("Expires")
         except aiohttp.ClientError as exc:
+            pm.esi_requests.labels(endpoint="sov", outcome="error").inc()
+            pm.errors.labels(component="esi").inc()
             raise RuntimeError(f"ESI sovereignty/map request failed: {exc!r}") from exc
+        finally:
+            pm.esi_request_seconds.labels(endpoint="sov").observe(
+                time.perf_counter() - _start
+            )
+        pm.esi_requests.labels(endpoint="sov", outcome="ok").inc()
         sov_map = {item["system_id"]: item for item in data}
         return sov_map, expires_header
 
@@ -278,7 +334,9 @@ class EsiClient:
             return None
         cached = await self._redis.get("esi:sov_map")
         if cached is None:
+            pm.esi_cache_misses.labels(entity="sov").inc()
             return None
+        pm.esi_cache_hits.labels(entity="sov").inc()
         raw: dict[str, dict] = json.loads(cached)
         return {int(k): v for k, v in raw.items()}
 

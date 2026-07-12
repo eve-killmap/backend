@@ -69,3 +69,12 @@ limits:
   max_killmail_ids: 100      # /kills/details/raw ids per request
   max_name_ids: 100          # POST /universe/names ids per request
   max_ws_connections: 1000   # per-process WebSocket connection cap
+
+metrics:
+  # Expose a Prometheus scrape endpoint (/metrics) on host:port. Off by default
+  # (enabling opens a listening socket). Application-level metrics only; Postgres
+  # and redis internals come from a separate DB exporter.
+  enabled: false
+  host: 0.0.0.0
+  # Usually set via METRICS_PORT in .env instead.
+  #port: 9108

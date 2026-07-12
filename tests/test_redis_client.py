@@ -126,3 +126,32 @@ def test_resolve_start_id_falls_back_when_stream_missing():
     b = KillBroadcaster()
     b._redis = _FakeStreamRedis(exc=ResponseError("no such key"))  # type: ignore[assignment]
     assert asyncio.run(b._resolve_start_id()) == "$"
+
+
+import app.prometheus_metrics as pm  # noqa: E402
+from prometheus_client import REGISTRY  # noqa: E402
+
+
+def _sample(name, labels=None):
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+def test_subscribe_unsubscribe_updates_live_clients_gauge():
+    b = KillBroadcaster()
+    base = _sample("eve_killmap_live_clients", {"transport": "ws"})
+    q = b.subscribe_global()
+    assert _sample("eve_killmap_live_clients", {"transport": "ws"}) - base == 1
+    b.unsubscribe_global(q)
+    assert _sample("eve_killmap_live_clients", {"transport": "ws"}) - base == 0
+    b.unsubscribe_global(q)  # double unsubscribe must not drift the gauge
+    assert _sample("eve_killmap_live_clients", {"transport": "ws"}) - base == 0
+
+
+def test_fanout_counts_dropped_messages():
+    b = KillBroadcaster()
+    full = asyncio.Queue(maxsize=1)
+    full.put_nowait({"already": "full"})
+    b._global_subs.add(full)  # type: ignore[attr-defined]
+    d0 = _sample("eve_killmap_ws_messages_dropped_total")
+    b._fanout({"solar_system_id": 30000142})
+    assert _sample("eve_killmap_ws_messages_dropped_total") - d0 == 1

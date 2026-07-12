@@ -93,12 +93,31 @@ materialized-view refresh; this service publishes `{"targets": ["sov"]}` after
 each sov refresh. Changing the `streaming.*` names is a breaking change to land in
 lockstep with `process-kills`.
 
+## Metrics
+
+Optional Prometheus instrumentation, off by default (`metrics.enabled: false`).
+Each worker exposes its own `/metrics` endpoint on a dedicated port
+(`METRICS_PORT`, set per-worker via systemd, e.g. `Environment=METRICS_PORT=910%i`
+→ `@1`=9101, `@2`=9102). Metrics are `eve_killmap_*`-prefixed and line up with
+`process-kills` on one Prometheus/Grafana stack.
+
+Because each worker is its own scrape target, aggregate across workers at query
+time in PromQL (`sum(eve_killmap_...)`) and keep per-worker visibility via the
+`instance` label, which is useful for "which worker is the leader"
+(`eve_killmap_broadcaster_is_leader`) or per-worker Redis latency. Multiprocess
+mode is deliberately not used.
+
+The metrics port is internal-only: bind loopback (default) or a private
+interface, firewall it, and do **not** put it behind nginx or expose it publicly.
+
 ## Security
 
 A public-facing API: input is capped, WebSockets enforce an Origin allow-list and
 connection cap, responses carry baseline security headers, and upstream errors are
 not echoed. Rate limiting is expected at nginx. See
 [`docs/superpowers/security-audit.md`](docs/superpowers/security-audit.md).
+The optional Prometheus metrics port (see [Metrics](#metrics)) is internal-only.
+Bind loopback/private and firewall it; never expose it publicly.
 
 ## Testing
 
