@@ -16,6 +16,7 @@ from redis.exceptions import (
 from app.config import config
 from app.metrics import metrics
 from app import prometheus_metrics as pm
+from app import entities
 from app.esi import esi_client
 from app.queries import get_type_names
 from app.timeparse import iso_to_epoch
@@ -60,7 +61,7 @@ _SYSTEM_FIELDS = (_GLOBAL_FIELDS - {"solar_system_id"}) | {"x", "y", "z"}
 
 
 async def _enrich_kill(kill: dict) -> dict:
-    """Resolve ESI names for victim and final blow attacker."""
+    """Resolve victim and final-blow names from the DB reference tables."""
     victim_character_id = kill.get("victim_character_id")
     victim_ship_type_id = kill.get("victim_ship_type_id")
     victim_corporation_id = kill.get("victim_corporation_id")
@@ -95,34 +96,19 @@ async def _enrich_kill(kill: dict) -> dict:
     kill_id = kill.get("killmail_id")
 
     try:
-        char_names, type_names = await asyncio.gather(
-            esi_client.resolve_names(character_ids),
-            get_type_names(type_ids),
+        character_names, corp_info, alliance_info, _ = await entities.fetch_entity_names(
+            character_ids, set(corp_ids), set(alliance_ids), set()
         )
-        names: dict[int, str] = {**char_names, **type_names}
+        type_names = await get_type_names(type_ids)
+        names: dict[int, str] = {**character_names, **type_names}
     except Exception as exc:
+        pm.errors.labels(component="broadcaster").inc()
         logger.warning(
-            "ESI name resolution failed for kill %s: %s", kill_id, exc or repr(exc)
+            "Kill enrichment DB lookup failed for kill %s: %s", kill_id, exc or repr(exc)
         )
         names = {}
-
-    corp_info: dict[int, tuple] = {}
-    for cid in corp_ids:
-        try:
-            corp_info[cid] = await esi_client.get_corporation_info(cid)
-        except Exception as exc:
-            logger.warning(
-                "ESI enrichment failed for kill %s: %s", kill_id, exc or repr(exc)
-            )
-
-    alliance_info: dict[int, tuple] = {}
-    for aid in alliance_ids:
-        try:
-            alliance_info[aid] = await esi_client.get_alliance_info(aid)
-        except Exception as exc:
-            logger.warning(
-                "ESI enrichment failed for kill %s: %s", kill_id, exc or repr(exc)
-            )
+        corp_info = {}
+        alliance_info = {}
 
     if victim_character_id is not None:
         victim_name = names.get(victim_character_id)

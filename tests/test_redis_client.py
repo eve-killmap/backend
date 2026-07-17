@@ -155,3 +155,47 @@ def test_fanout_counts_dropped_messages():
     d0 = _sample("eve_killmap_ws_messages_dropped_total")
     b._fanout({"solar_system_id": 30000142})
     assert _sample("eve_killmap_ws_messages_dropped_total") - d0 == 1
+
+
+import app.entities as entities  # noqa: E402
+import app.redis_client as rc  # noqa: E402
+
+
+def test_enrich_kill_uses_db(monkeypatch):
+    async def fake_entities(char_ids, corp_ids, alliance_ids, faction_ids):
+        return ({1: "Pilot"}, {10: ("Corp", "TIC")}, {20: ("Alli", "AL1")}, {})
+
+    async def fake_types(ids):
+        return {587: "Rifter"}
+
+    monkeypatch.setattr(entities, "fetch_entity_names", fake_entities)
+    monkeypatch.setattr(rc, "get_type_names", fake_types)
+
+    kill = {
+        "killmail_id": 42, "victim_character_id": 1, "victim_ship_type_id": 587,
+        "victim_corporation_id": 10, "victim_alliance_id": 20,
+        "attackers": [{"final_blow": True, "character_id": 1, "ship_type_id": 587,
+                       "corporation_id": 10, "alliance_id": 20}],
+    }
+    out = asyncio.run(rc._enrich_kill(kill))
+    assert out["v_character_name"] == "Pilot"
+    assert out["v_corporation_name"] == "Corp"
+    assert out["v_alliance_name"] == "Alli"
+    assert out["v_ship_name"] == "Rifter"
+
+
+def test_enrich_kill_resilient_on_db_error(monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(entities, "fetch_entity_names", boom)
+
+    async def fake_types(ids):
+        return {}
+
+    monkeypatch.setattr(rc, "get_type_names", fake_types)
+    kill = {"killmail_id": 7, "victim_character_id": 1, "victim_ship_type_id": 587,
+            "victim_corporation_id": 10, "victim_alliance_id": 20, "attackers": []}
+    out = asyncio.run(rc._enrich_kill(kill))   # must not raise
+    assert out["v_character_name"] is None
+    assert out["v_corporation_name"] is None
