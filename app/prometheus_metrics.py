@@ -101,12 +101,6 @@ esi_cache_misses = Counter(
     "ESI Redis-cache misses, by entity.",
     ["entity"],
 )
-esi_rate_limit_tokens = Gauge(
-    "eve_killmap_esi_rate_limit_tokens",
-    "Remaining tokens reported by the ESI war endpoint rate-limit header.",
-)
-
-
 # Entity resolution (DB reference tables)
 
 entity_lookups = Counter(

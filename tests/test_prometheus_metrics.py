@@ -36,7 +36,6 @@ def test_singletons_accept_calls():
     for entity in ("character", "corporation", "alliance", "war", "sov"):
         pm.esi_cache_hits.labels(entity=entity).inc()
         pm.esi_cache_misses.labels(entity=entity).inc()
-    pm.esi_rate_limit_tokens.set(100)
     pm.broadcaster_is_leader.set(1)
     pm.leader_promotions.inc()
     pm.stream_read_interruptions.inc()
