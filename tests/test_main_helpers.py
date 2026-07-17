@@ -108,3 +108,28 @@ def test_main_no_war_esi_reference():
     src = pathlib.Path("app/main.py").read_text(encoding="utf-8")
     assert "get_war_info" not in src
     assert "raw_war" not in src
+
+
+def test_universe_names_uses_types(monkeypatch):
+    import asyncio
+    import app.main as main
+
+    async def fake_types(ids):
+        return {587: "Rifter"}
+
+    monkeypatch.setattr(main, "get_type_names", fake_types)
+    out = asyncio.run(main.resolve_universe_names([587]))
+    assert out == {587: "Rifter"}
+
+
+def test_universe_names_rejects_over_cap():
+    import asyncio
+    import app.main as main
+    from fastapi import HTTPException
+
+    too_many = list(range(main.config.limits.max_name_ids + 1))
+    try:
+        asyncio.run(main.resolve_universe_names(too_many))
+        assert False, "expected HTTPException"
+    except HTTPException as exc:
+        assert exc.status_code == 400

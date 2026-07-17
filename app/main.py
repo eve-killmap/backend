@@ -24,7 +24,7 @@ from app.cache import (
 )
 from app.http_cache import json_cache_response, binary_cache_response
 from app.binary_encoder import encode_kills_binary
-from app.esi import esi_client, EsiNotFoundError
+from app.esi import esi_client
 from app.redis_client import broadcaster
 from app import prometheus_metrics
 from app import entities
@@ -606,17 +606,11 @@ async def get_farthest_kill(
 async def resolve_universe_names(
     ids: Annotated[list[int], Body()],
 ) -> dict[int, str]:
-    """Resolve names for a list of IDs."""
+    """Resolve ship type names for a list of type IDs (from the `types` table)."""
     error = validate_id_list(ids, config.limits.max_name_ids)
     if error is not None:
         raise HTTPException(status_code=400, detail=error)
-    try:
-        return await esi_client.resolve_names(set(ids))
-    except EsiNotFoundError:
-        raise HTTPException(status_code=404, detail="One or more IDs not found")
-    except RuntimeError:
-        logger.exception("ESI resolve_names failed")
-        raise HTTPException(status_code=502, detail="Upstream service unavailable")
+    return await get_type_names(set(ids))
 
 
 async def _ws_stream(websocket: WebSocket, q: asyncio.Queue) -> None:
