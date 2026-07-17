@@ -24,12 +24,12 @@ from app.cache import (
 )
 from app.http_cache import json_cache_response, binary_cache_response
 from app.binary_encoder import encode_kills_binary
-from app.esi import esi_client, EsiNotFoundError, EsiRateLimitError
+from app.esi import esi_client, EsiNotFoundError
 from app.redis_client import broadcaster
 from app import prometheus_metrics
+from app import entities
 import app.queries as queries
 import app.invalidation as invalidation
-from app.timeparse import iso_to_epoch
 from app.models import (
     RawKillDetailResponse,
     ProcessedKillDetailResponse,
@@ -37,8 +37,6 @@ from app.models import (
     FarthestKillResponse,
     VictimProcessed,
     AttackerProcessed,
-    WarProcessed,
-    WarParticipant,
     SovResponse,
     GroupInfo,
     HealthDetailResponse,
@@ -287,26 +285,27 @@ async def get_kill_details_processed(
     top_damage_attacker = attackers[top_damage_idx]
     final_blow_is_top_damage = final_blow_idx == top_damage_idx
 
-    ids_to_resolve: set[int] = set()
+    character_ids: set[int] = set()
+    faction_ids: set[int] = set()
     type_ids_to_resolve: set[int] = set()
 
     if victim.character_id is None:
         type_ids_to_resolve.add(victim.ship_type_id)
     else:
-        ids_to_resolve.add(victim.character_id)
+        character_ids.add(victim.character_id)
     if victim.faction_id is not None:
-        ids_to_resolve.add(victim.faction_id)
+        faction_ids.add(victim.faction_id)
 
     for atk in [final_blow_attacker, top_damage_attacker]:
         if atk.character_id is None:
             if atk.ship_type_id is not None:
                 type_ids_to_resolve.add(atk.ship_type_id)
         else:
-            ids_to_resolve.add(atk.character_id)
+            character_ids.add(atk.character_id)
             if atk.ship_type_id is not None:
                 type_ids_to_resolve.add(atk.ship_type_id)
         if atk.faction_id is not None:
-            ids_to_resolve.add(atk.faction_id)
+            faction_ids.add(atk.faction_id)
         if atk.weapon_type_id is not None:
             type_ids_to_resolve.add(atk.weapon_type_id)
 
@@ -329,44 +328,20 @@ async def get_kill_details_processed(
         if id_ is not None
     }
 
-    raw_war: dict | None = None
-    if kill.war_id is not None:
-        try:
-            raw_war = await esi_client.get_war_info(kill.war_id)
-            for side in ("aggressor", "defender"):
-                p = raw_war[side]
-                if p.get("corporation_id") is not None:
-                    corp_id_set.add(p["corporation_id"])
-                if p.get("alliance_id") is not None:
-                    alliance_id_set.add(p["alliance_id"])
-        except (EsiRateLimitError, EsiNotFoundError):
-            pass
-        except RuntimeError:
-            logger.exception("ESI upstream call failed")
-            raise HTTPException(status_code=502, detail="Upstream service unavailable")
+    war_row = await entities.fetch_war(kill.war_id) if kill.war_id is not None else None
+    if war_row is not None:
+        for cid in (war_row["aggressor_corporation_id"], war_row["defender_corporation_id"]):
+            if cid is not None:
+                corp_id_set.add(cid)
+        for aid in (war_row["aggressor_alliance_id"], war_row["defender_alliance_id"]):
+            if aid is not None:
+                alliance_id_set.add(aid)
 
-    corp_ids = list(corp_id_set)
-    alliance_ids = list(alliance_id_set)
-
-    try:
-        all_results = await asyncio.gather(
-            esi_client.resolve_names(ids_to_resolve),
-            get_type_names(type_ids_to_resolve),
-            *[esi_client.get_corporation_info(cid) for cid in corp_ids],
-            *[esi_client.get_alliance_info(aid) for aid in alliance_ids],
-        )
-    except RuntimeError:
-        logger.exception("ESI upstream call failed")
-        raise HTTPException(status_code=502, detail="Upstream service unavailable")
-
-    names: dict[int, str] = {**all_results[0], **all_results[1]}  # type: ignore[arg-type]
-    corp_info: dict[int, tuple[str, str]] = {  # type: ignore[misc]
-        corp_ids[i]: all_results[2 + i] for i in range(len(corp_ids))
-    }
-    alliance_info: dict[int, tuple[str, str]] = {  # type: ignore[misc]
-        alliance_ids[i]: all_results[2 + len(corp_ids) + i]
-        for i in range(len(alliance_ids))
-    }
+    (character_names, corp_info, alliance_info, faction_names), type_names = await asyncio.gather(
+        entities.fetch_entity_names(character_ids, corp_id_set, alliance_id_set, faction_ids),
+        get_type_names(type_ids_to_resolve),
+    )
+    names: dict[int, str] = {**character_names, **faction_names, **type_names}
 
     def build_attacker(atk) -> AttackerProcessed:
         if atk.character_id is None:
@@ -434,32 +409,7 @@ async def get_kill_details_processed(
         damage_taken=victim.damage_taken,
     )
 
-    def build_war_participant(p: dict) -> WarParticipant:
-        corp_id = p.get("corporation_id")
-        alliance_id = p.get("alliance_id")
-        corp = corp_info.get(corp_id) if corp_id is not None else None
-        alliance = alliance_info.get(alliance_id) if alliance_id is not None else None
-        return WarParticipant(
-            alliance=alliance[0] if alliance else None,
-            alliance_ticker=alliance[1] if alliance else None,
-            corporation=corp[0] if corp else None,
-            corporation_ticker=corp[1] if corp else None,
-            ships_killed=p["ships_killed"],
-        )
-
-    war_info: WarProcessed | None = None
-    if raw_war is not None:
-        _declared = iso_to_epoch(raw_war["declared"])
-        assert _declared is not None, "ESI war.declared is always a timestamp string"
-        war_info = WarProcessed(
-            aggressor=build_war_participant(raw_war["aggressor"]),
-            defender=build_war_participant(raw_war["defender"]),
-            declared=_declared,
-            finished=iso_to_epoch(raw_war.get("finished")),
-            mutual=raw_war["mutual"],
-            retracted=iso_to_epoch(raw_war.get("retracted")),
-            started=iso_to_epoch(raw_war.get("started")),
-        )
+    war_info = entities.build_war_processed(war_row, corp_info, alliance_info) if war_row is not None else None
 
     result = ProcessedKillDetailResponse(
         victim=victim_processed,

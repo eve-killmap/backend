@@ -100,3 +100,11 @@ def test_ws_guard_rejected_origin_metric():
         - r0
         == 1
     )
+
+
+def test_main_no_war_esi_reference():
+    import pathlib
+
+    src = pathlib.Path("app/main.py").read_text(encoding="utf-8")
+    assert "get_war_info" not in src
+    assert "raw_war" not in src
