@@ -60,8 +60,6 @@ class CacheConfig:
     type_name_ttl: int
     esi_corp_ttl: int
     esi_alliance_ttl: int
-    esi_name_ttl: int
-    esi_war_fallback_ttl: int
     esi_sov_fallback_ttl: int
     rankings_ttl: int
     sov_ttl: int
@@ -69,11 +67,6 @@ class CacheConfig:
     kill_detail_ttl: int
     kill_detail_processed_ttl: int
     system_latest_ttl: int
-
-
-@dataclass(frozen=True)
-class EsiConfig:
-    war_ratelimit_low_water: int
 
 
 @dataclass(frozen=True)
@@ -110,7 +103,6 @@ class Config:
     cors: CorsConfig
     database: DatabaseConfig
     cache: CacheConfig
-    esi: EsiConfig
     streaming: StreamingConfig
     health: HealthConfig
     limits: LimitsConfig
@@ -190,7 +182,6 @@ def load_config(
     cors_cfg = _section(data, "cors")
     db_cfg = _section(data, "database")
     cache_cfg = _section(data, "cache")
-    esi_cfg = _section(data, "esi")
     stream_cfg = _section(data, "streaming")
     health_cfg = _section(data, "health")
     limits_cfg = _section(data, "limits")
@@ -261,14 +252,6 @@ def load_config(
             "cache.esi_alliance_ttl",
             minimum=1,
         ),
-        esi_name_ttl=_as_int(
-            cache_cfg.get("esi_name_ttl", 604800), "cache.esi_name_ttl", minimum=1
-        ),
-        esi_war_fallback_ttl=_as_int(
-            cache_cfg.get("esi_war_fallback_ttl", 21600),
-            "cache.esi_war_fallback_ttl",
-            minimum=1,
-        ),
         esi_sov_fallback_ttl=_as_int(
             cache_cfg.get("esi_sov_fallback_ttl", 3600),
             "cache.esi_sov_fallback_ttl",
@@ -293,14 +276,6 @@ def load_config(
         ),
         system_latest_ttl=_as_int(
             cache_cfg.get("system_latest_ttl", 10), "cache.system_latest_ttl", minimum=1
-        ),
-    )
-
-    esi_config = EsiConfig(
-        war_ratelimit_low_water=_as_int(
-            esi_cfg.get("war_ratelimit_low_water", 200),
-            "esi.war_ratelimit_low_water",
-            minimum=0,
         ),
     )
 
@@ -372,7 +347,6 @@ def load_config(
         cors=cors_config,
         database=database_config,
         cache=cache_config,
-        esi=esi_config,
         streaming=streaming_config,
         health=health_config,
         limits=limits_config,
