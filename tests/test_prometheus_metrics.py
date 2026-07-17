@@ -51,6 +51,11 @@ def test_singletons_accept_calls():
     pm.ws_messages_dropped.inc()
     pm.since_short_circuits.inc()
     pm.kills_binary_response_bytes.observe(2048)
+    for kind in ("character", "corporation", "alliance", "faction"):
+        for result in ("found", "missing"):
+            pm.entity_lookups.labels(kind=kind, result=result).inc()
+    for result in ("resolved", "stub", "absent"):
+        pm.war_lookups.labels(result=result).inc()
     for component in ("esi", "broadcaster", "invalidation"):
         pm.errors.labels(component=component).inc()
 

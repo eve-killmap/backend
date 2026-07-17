@@ -107,6 +107,20 @@ esi_rate_limit_tokens = Gauge(
 )
 
 
+# Entity resolution (DB reference tables)
+
+entity_lookups = Counter(
+    "eve_killmap_entity_lookups",
+    "Entity name resolutions from the DB reference tables, by kind and result.",
+    ["kind", "result"],  # kind: character|corporation|alliance|faction  result: found|missing
+)
+war_lookups = Counter(
+    "eve_killmap_war_lookups",
+    "War lookups from the wars table, by result.",
+    ["result"],  # resolved|stub|absent
+)
+
+
 # Broadcaster / leader
 
 broadcaster_is_leader = Gauge(
