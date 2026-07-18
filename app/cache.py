@@ -57,6 +57,8 @@ class QueryCache:
             return None
         metrics.cache_hits += 1
         pm.cache_hits.labels(cache=prefix).inc()
+        # Frames are stored as raw bytes; tolerate a str value in case a
+        # decode_responses=True client is ever wired in.
         if isinstance(value, str):
             value = value.encode()
         gzipped = value[0] == 1

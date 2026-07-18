@@ -22,6 +22,11 @@ cors:
     - POST
   allow_headers:
     - "*"
+  # Response headers the browser will let JS read cross-origin. X-Kills-Fresh-To
+  # drives the frontend's delta-poll `since`; without exposing it,
+  # response.headers.get("X-Kills-Fresh-To") returns null in the browser.
+  expose_headers:
+    - X-Kills-Fresh-To
 
 database:
   # asyncpg connection pool sizing.

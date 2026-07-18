@@ -102,6 +102,18 @@ def test_ws_guard_rejected_origin_metric():
     )
 
 
+def test_cors_middleware_wires_expose_headers():
+    # The browser only lets the frontend read X-Kills-Fresh-To if the server
+    # exposes it via CORS. Assert the middleware receives the config's list and
+    # that the default carries the freshness header.
+    from starlette.middleware.cors import CORSMiddleware
+    import app.main as main
+
+    cors = next(mw for mw in main.app.user_middleware if mw.cls is CORSMiddleware)
+    assert cors.kwargs["expose_headers"] == main.config.cors.expose_headers
+    assert "X-Kills-Fresh-To" in main.config.cors.expose_headers
+
+
 def test_main_no_war_esi_reference():
     import pathlib
 

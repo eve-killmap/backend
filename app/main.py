@@ -167,6 +167,7 @@ app.add_middleware(
     allow_origins=config.cors.allow_origins,
     allow_methods=config.cors.allow_methods,
     allow_headers=config.cors.allow_headers,
+    expose_headers=config.cors.expose_headers,
 )
 
 if config.metrics.enabled:
@@ -505,26 +506,24 @@ async def get_system_kills(
     if since is not None:
         latest = await get_system_latest(solar_system_id)
         fresh_to = latest if latest is not None else int(time.time())
-        headers = {"Cache-Control": "no-store", "X-Kills-Fresh-To": str(fresh_to)}
         if should_short_circuit(since, latest):
             prometheus_metrics.since_short_circuits.inc()
             payload = encode_kills_binary([], [], [], [], [], [])
-            prometheus_metrics.kills_binary_response_bytes.observe(len(payload))
-            return Response(
-                content=payload, media_type="application/octet-stream", headers=headers
+        else:
+            result = await fetch_raw_kills(solar_system_id=solar_system_id, since=since)
+            payload = encode_kills_binary(
+                killmail_ids=result["killmail_ids"],
+                killmail_times=result["killmail_times"],
+                x=[int(v) for v in result["x"]],
+                y=[int(v) for v in result["y"]],
+                z=[int(v) for v in result["z"]],
+                ship_types=result["ship_types"],
             )
-        result = await fetch_raw_kills(solar_system_id=solar_system_id, since=since)
-        payload = encode_kills_binary(
-            killmail_ids=result["killmail_ids"],
-            killmail_times=result["killmail_times"],
-            x=[int(v) for v in result["x"]],
-            y=[int(v) for v in result["y"]],
-            z=[int(v) for v in result["z"]],
-            ship_types=result["ship_types"],
-        )
         prometheus_metrics.kills_binary_response_bytes.observe(len(payload))
         return Response(
-            content=payload, media_type="application/octet-stream", headers=headers
+            content=payload,
+            media_type="application/octet-stream",
+            headers={"Cache-Control": "no-store", "X-Kills-Fresh-To": str(fresh_to)},
         )
 
     cache_params = {"solar_system_id": solar_system_id}

@@ -113,6 +113,19 @@ def test_cors_comma_string_parsed_as_list(tmp_path):
     assert cfg.cors.allow_origins == ["https://a.example", "https://b.example"]
 
 
+def test_cors_expose_headers_default(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.cors.expose_headers == ["X-Kills-Fresh-To"]
+
+
+def test_cors_expose_headers_override(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path, "cors:\n  expose_headers:\n    - X-Foo\n    - X-Bar\n"
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.cors.expose_headers == ["X-Foo", "X-Bar"]
+
+
 def test_log_file_relative_resolves_against_base_dir(tmp_path):
     cfg = load_config(
         yaml_path=tmp_path / "x.yml", env={"LOG_FILE": "sub/app.log"}, base_dir=tmp_path

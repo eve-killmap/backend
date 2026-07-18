@@ -45,6 +45,7 @@ class CorsConfig:
     allow_origins: list[str]
     allow_methods: list[str]
     allow_headers: list[str]
+    expose_headers: list[str]
 
 
 @dataclass(frozen=True)
@@ -235,6 +236,13 @@ def load_config(
         ),
         allow_headers=_as_str_list(
             cors_cfg.get("allow_headers", ["*"]), "cors.allow_headers"
+        ),
+        # Custom response headers the browser will let JS read cross-origin.
+        # X-Kills-Fresh-To drives the frontend's delta-poll `since`, so it must
+        # be exposed or `response.headers.get(...)` returns null in the browser.
+        expose_headers=_as_str_list(
+            cors_cfg.get("expose_headers", ["X-Kills-Fresh-To"]),
+            "cors.expose_headers",
         ),
     )
 
