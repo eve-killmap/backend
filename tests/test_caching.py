@@ -99,10 +99,39 @@ class _FakeRedisGet:
         return self._value
 
 
+import hashlib as _hashlib
+
+
+def _query_frame(body_str: str, *, gzipped: bool = False, body_bytes: bytes | None = None) -> bytes:
+    raw = body_str.encode()
+    digest = _hashlib.md5(raw).digest()
+    stored_body = body_bytes if body_bytes is not None else raw
+    return bytes([1 if gzipped else 0]) + digest + stored_body
+
+
+def test_query_cache_hit_returns_etag_gzip_body():
+    from app.cache import QueryCache
+
+    qc = QueryCache(); qc.set_redis(_FakeRedisGet(_query_frame("cached")))
+    res = asyncio.run(qc.get("sov", {"a": 1}))
+    assert res is not None
+    etag, gzipped, body = res
+    assert etag == '"' + _hashlib.md5(b"cached").hexdigest() + '"'
+    assert gzipped is False
+    assert body == b"cached"
+
+
+def test_query_cache_miss_returns_none():
+    from app.cache import QueryCache
+
+    qc = QueryCache(); qc.set_redis(_FakeRedisGet(None))
+    assert asyncio.run(qc.get("sov", {"a": 2})) is None
+
+
 def test_query_cache_hit_and_miss_metrics():
     from app.cache import QueryCache
 
-    hit = QueryCache(); hit.set_redis(_FakeRedisGet("cached"))
+    hit = QueryCache(); hit.set_redis(_FakeRedisGet(_query_frame("cached")))
     miss = QueryCache(); miss.set_redis(_FakeRedisGet(None))
 
     h0 = _sample("eve_killmap_cache_hits_total", {"cache": "sov"})
@@ -117,15 +146,46 @@ def test_query_cache_hit_and_miss_metrics():
     assert _sample("eve_killmap_redis_command_seconds_count", {"op": "get"}) - g0 == 2
 
 
-class _FakeRedisSet:
-    async def set(self, *a, **k):
+class _FakeRedisStore:
+    def __init__(self):
+        self.stored: dict[str, bytes] = {}
+
+    async def set(self, key, value, ex=None):
+        self.stored[key] = value
         return True
+
+
+def test_query_cache_set_frames_and_returns_shape():
+    from app.cache import QueryCache
+
+    store = _FakeRedisStore()
+    qc = QueryCache(); qc.set_redis(store)
+    etag, gzipped, body = asyncio.run(qc.set("sov", {"a": 1}, '{"x":1}', ttl=10))
+
+    assert etag == '"' + _hashlib.md5(b'{"x":1}').hexdigest() + '"'
+    assert gzipped is False               # 7 bytes < 1000
+    assert body == b'{"x":1}'
+    (frame,) = store.stored.values()
+    assert frame == bytes([0]) + _hashlib.md5(b'{"x":1}').digest() + b'{"x":1}'
+
+
+def test_query_cache_set_gzips_large_body():
+    import gzip as _gzip
+    from app.cache import QueryCache
+
+    store = _FakeRedisStore()
+    qc = QueryCache(); qc.set_redis(store)
+    big = "a" * 5000
+    etag, gzipped, body = asyncio.run(qc.set("system_rankings", {"limit": 10}, big, ttl=10))
+    assert gzipped is True
+    assert _gzip.decompress(body) == big.encode()
+    assert etag == '"' + _hashlib.md5(big.encode()).hexdigest() + '"'
 
 
 def test_query_cache_set_times_op():
     from app.cache import QueryCache
 
-    qc = QueryCache(); qc.set_redis(_FakeRedisSet())
+    qc = QueryCache(); qc.set_redis(_FakeRedisStore())
     s0 = _sample("eve_killmap_redis_command_seconds_count", {"op": "set"})
     asyncio.run(qc.set("sov", {"a": 1}, "value", ttl=10))
     assert _sample("eve_killmap_redis_command_seconds_count", {"op": "set"}) - s0 == 1
@@ -176,12 +236,15 @@ def test_query_cache_get_degrades_on_redis_error():
     assert _sample("eve_killmap_errors_total", {"component": "cache"}) - e0 == 1
 
 
-def test_query_cache_set_degrades_on_redis_error():
+def test_query_cache_set_degrades_but_returns_body():
     from app.cache import QueryCache
 
     qc = QueryCache(); qc.set_redis(_FakeRedisRaising())
     e0 = _sample("eve_killmap_errors_total", {"component": "cache"})
-    asyncio.run(qc.set("sov", {"a": 1}, "value", ttl=10))  # must not raise
+    res = asyncio.run(qc.set("sov", {"a": 1}, "value", ttl=10))  # must not raise
+    assert res is not None
+    etag, gzipped, body = res
+    assert body == b"value"
     assert _sample("eve_killmap_errors_total", {"component": "cache"}) - e0 == 1
 
 

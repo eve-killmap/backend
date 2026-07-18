@@ -2,11 +2,13 @@ import asyncio
 import hashlib
 import json
 import logging
+import struct
 import time
 
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
 
+from app.compression import gzip_if_large
 from app.config import config
 from app.metrics import metrics
 from app import prometheus_metrics as pm
@@ -20,6 +22,10 @@ def _hash_params(params: dict) -> str:
     ).hexdigest()[:16]
 
 
+QUERY_KEY_VERSION = "v2"
+BINARY_KEY_VERSION = "v2"
+
+
 class QueryCache:
     """Redis-backed cache for serialized Pydantic API responses."""
 
@@ -29,12 +35,14 @@ class QueryCache:
     def set_redis(self, redis: aioredis.Redis) -> None:
         self._redis = redis
 
-    async def get(self, prefix: str, params: dict) -> str | None:
+    async def get(self, prefix: str, params: dict) -> tuple[str, bool, bytes] | None:
         if self._redis is None:
             return None
         _start = time.perf_counter()
         try:
-            value = await self._redis.get(f"query:{prefix}:{_hash_params(params)}")
+            value = await self._redis.get(
+                f"query:{QUERY_KEY_VERSION}:{prefix}:{_hash_params(params)}"
+            )
         except RedisError as exc:
             pm.errors.labels(component="cache").inc()
             logger.warning("Cache get failed for %s; treating as miss: %s", prefix, exc)
@@ -46,31 +54,40 @@ class QueryCache:
         if value is None:
             metrics.cache_misses += 1
             pm.cache_misses.labels(cache=prefix).inc()
-        else:
-            metrics.cache_hits += 1
-            pm.cache_hits.labels(cache=prefix).inc()
-        # Redis may return bytes when decode_responses=False; normalise to str.
-        return value.decode() if isinstance(value, bytes) else value
+            return None
+        metrics.cache_hits += 1
+        pm.cache_hits.labels(cache=prefix).inc()
+        if isinstance(value, str):
+            value = value.encode()
+        gzipped = value[0] == 1
+        etag = '"' + value[1:17].hex() + '"'
+        body = value[17:]
+        return etag, gzipped, body
 
     async def set(
         self, prefix: str, params: dict, value: str, ttl: int | None = None
-    ) -> None:
+    ) -> tuple[str, bool, bytes]:
+        raw = value.encode("utf-8")
+        digest = hashlib.md5(raw).digest()
+        body, gzipped = await gzip_if_large(raw)
+        etag = '"' + digest.hex() + '"'
         if self._redis is None:
-            return
+            return etag, gzipped, body
         ttl = config.cache.query_ttl if ttl is None else ttl
+        frame = bytes([1 if gzipped else 0]) + digest + body
         _start = time.perf_counter()
         try:
             await self._redis.set(
-                f"query:{prefix}:{_hash_params(params)}", value, ex=ttl
+                f"query:{QUERY_KEY_VERSION}:{prefix}:{_hash_params(params)}", frame, ex=ttl
             )
         except RedisError as exc:
             pm.errors.labels(component="cache").inc()
             logger.warning("Cache set failed for %s; skipping: %s", prefix, exc)
-            return
         finally:
             pm.redis_command_seconds.labels(op="set").observe(
                 time.perf_counter() - _start
             )
+        return etag, gzipped, body
 
 
 class KillsBinaryCache:
