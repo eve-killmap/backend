@@ -291,6 +291,8 @@ class KillBroadcaster:
 
     async def _election_step(self) -> None:
         assert self._redis is not None
+        if not config.leader_election:
+            return
         if self._is_leader:
             renewed = await self._redis.eval(
                 _RENEW_SCRIPT, 1, _LOCK_KEY, self._instance_id, str(_LOCK_TTL)

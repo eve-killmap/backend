@@ -191,3 +191,26 @@ def test_metrics_enabled_not_bool_raises(tmp_path):
     yaml_path = _write_yaml(tmp_path, "metrics:\n  enabled: yes-please\n")
     with pytest.raises(ConfigError):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_leader_election_defaults_true(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.leader_election is True
+
+
+def test_leader_election_false(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"LEADER_ELECTION": "False"},
+        base_dir=tmp_path,
+    )
+    assert cfg.leader_election is False
+
+
+def test_leader_election_true_explicit(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"LEADER_ELECTION": "True"},
+        base_dir=tmp_path,
+    )
+    assert cfg.leader_election is True

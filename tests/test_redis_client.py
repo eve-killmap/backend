@@ -87,6 +87,21 @@ def test_follower_takes_over_when_leader_lock_expires():
     assert shared.store[_LOCK_KEY] == b2._instance_id
 
 
+def test_leader_election_disabled_never_acquires(monkeypatch):
+    import types
+    import app.redis_client as rc
+
+    b = KillBroadcaster()
+    b._redis = _FakeLockRedis()  # type: ignore[assignment]
+    _stub_promote_demote(b)
+    monkeypatch.setattr(rc, "config", types.SimpleNamespace(leader_election=False))
+
+    asyncio.run(b._election_step())
+
+    assert b._is_leader is False
+    assert _LOCK_KEY not in b._redis.store  # type: ignore[attr-defined]
+
+
 def test_leader_demotes_when_lock_stolen():
     b = KillBroadcaster()
     shared = _FakeLockRedis()

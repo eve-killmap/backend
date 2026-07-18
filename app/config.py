@@ -113,6 +113,7 @@ class Config:
     redis_cache_url: str | None
     health_token: str | None
     worker_id: str | None
+    leader_election: bool
 
 
 def worker_log_file(path: Path, worker_id: str | None) -> Path:
@@ -199,6 +200,8 @@ def load_config(
 
     worker_id = env.get("WORKER_ID") or None
     log_file = worker_log_file(log_file, worker_id)
+
+    leader_election = (env.get("LEADER_ELECTION") or "true").strip().lower() != "false"
 
     logging_config = LoggingConfig(
         level=level,
@@ -357,6 +360,7 @@ def load_config(
         redis_cache_url=env.get("REDIS_CACHE_URL") or None,
         health_token=env.get("HEALTH_TOKEN") or None,
         worker_id=worker_id,
+        leader_election=leader_election,
     )
 
 
