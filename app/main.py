@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Annotated, cast
 
@@ -22,7 +23,7 @@ from app.cache import (
     should_short_circuit,
     get_system_latest,
 )
-from app.http_cache import json_cache_response, binary_cache_response
+from app.http_cache import json_cache_response, binary_cache_response, compute_etag
 from app.binary_encoder import encode_kills_binary
 from app.esi import esi_client
 from app.redis_client import broadcaster
@@ -86,7 +87,7 @@ async def lifespan(_app: FastAPI):
         cache_redis_bytes = _build_cache_client(decode_responses=False)
         await esi_client.startup(cache_redis)
         queries.set_redis(cache_redis)
-        query_cache.set_redis(cache_redis)
+        query_cache.set_redis(cache_redis_bytes)
         kills_binary_cache.set_redis(cache_redis_bytes)
         health.set_redis(cache_redis)
         heartbeat_task = asyncio.create_task(
@@ -451,25 +452,26 @@ async def get_system_kills(
             description="Only return kills inserted after this Unix epoch timestamp (seconds)"
         ),
     ] = None,
-    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ):
-    """Get binary-encoded kills in a solar system."""
+    """Get binary-encoded kills in a solar system.
+
+    Full payload (since=None) is cached once per TTL, single-flighted, and served
+    pre-compressed with a build-time X-Kills-Fresh-To boundary. Poll and
+    short-circuit responses are live and no-store.
+    """
     if since is not None:
         latest = await get_system_latest(solar_system_id)
+        fresh_to = latest if latest is not None else int(time.time())
+        headers = {"Cache-Control": "no-store", "X-Kills-Fresh-To": str(fresh_to)}
         if should_short_circuit(since, latest):
             prometheus_metrics.since_short_circuits.inc()
             payload = encode_kills_binary([], [], [], [], [], [])
             prometheus_metrics.kills_binary_response_bytes.observe(len(payload))
             return Response(
-                content=payload,
-                media_type="application/octet-stream",
+                content=payload, media_type="application/octet-stream", headers=headers
             )
-
-    cache_params = {"solar_system_id": solar_system_id, "since": since}
-    cached = await kills_binary_cache.get(cache_params)
-    if cached is None:
         result = await fetch_raw_kills(solar_system_id=solar_system_id, since=since)
-        cached = encode_kills_binary(
+        payload = encode_kills_binary(
             killmail_ids=result["killmail_ids"],
             killmail_times=result["killmail_times"],
             x=[int(v) for v in result["x"]],
@@ -477,13 +479,36 @@ async def get_system_kills(
             z=[int(v) for v in result["z"]],
             ship_types=result["ship_types"],
         )
-        await kills_binary_cache.set(cache_params, cached)
-    prometheus_metrics.kills_binary_response_bytes.observe(len(cached))
-    if since is None:
-        return binary_cache_response(
-            cached, max_age=config.cache.binary_ttl, if_none_match=if_none_match
+        prometheus_metrics.kills_binary_response_bytes.observe(len(payload))
+        return Response(
+            content=payload, media_type="application/octet-stream", headers=headers
         )
-    return Response(content=cached, media_type="application/octet-stream")
+
+    cache_params = {"solar_system_id": solar_system_id}
+    res = await kills_binary_cache.get(cache_params)
+    if res is None:
+        async with single_flight.lock(f"kills_binary:{solar_system_id}"):
+            res = await kills_binary_cache.get(cache_params)
+            if res is None:
+                # Capture the freshness boundary BEFORE fetching so fresh_to never
+                # exceeds the payload's completeness edge (design §3).
+                latest = await get_system_latest(solar_system_id)
+                fresh_to = latest if latest is not None else int(time.time())
+                result = await fetch_raw_kills(solar_system_id=solar_system_id, since=None)
+                encoded = encode_kills_binary(
+                    killmail_ids=result["killmail_ids"],
+                    killmail_times=result["killmail_times"],
+                    x=[int(v) for v in result["x"]],
+                    y=[int(v) for v in result["y"]],
+                    z=[int(v) for v in result["z"]],
+                    ship_types=result["ship_types"],
+                )
+                res = await kills_binary_cache.set(cache_params, encoded, fresh_to)
+    fresh_to, gzipped, body = res
+    prometheus_metrics.kills_binary_response_bytes.observe(len(body))
+    return binary_cache_response(
+        body, gzipped=gzipped, max_age=config.cache.binary_ttl, fresh_to=fresh_to
+    )
 
 
 @app.get("/systems/{solar_system_id}/sov", response_model=None)
