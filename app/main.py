@@ -518,66 +518,75 @@ async def get_system_sov(
 ):
     """Get the current sovereignty of a solar system."""
     cache_params = {"solar_system_id": solar_system_id}
-    cached = await query_cache.get("sov", cache_params)
-    if cached is None:
-        sov_map = await esi_client.get_sov_map_cached()
-        if sov_map is None:
-            raise HTTPException(status_code=503, detail="Sovereignty data warming up")
-        system = sov_map.get(solar_system_id)
-        if system is None:
-            result = SovResponse(claimed=False)
-        else:
-            alliance_id: int | None = system.get("alliance_id")
-            corporation_id: int | None = system.get("corporation_id")
-            if alliance_id is None and corporation_id is None:
-                result = SovResponse(claimed=False)
-            else:
-                try:
-                    alliance_info, corporation_info = await asyncio.gather(
-                        (
-                            esi_client.get_alliance_info(alliance_id)
-                            if alliance_id
-                            else asyncio.sleep(0, result=None)
-                        ),
-                        (
-                            esi_client.get_corporation_info(corporation_id)
-                            if corporation_id
-                            else asyncio.sleep(0, result=None)
-                        ),
-                    )
-                except RuntimeError:
-                    logger.exception("ESI upstream call failed")
+    res = await query_cache.get("sov", cache_params)
+    if res is None:
+        async with single_flight.lock(f"sov:{solar_system_id}"):
+            res = await query_cache.get("sov", cache_params)
+            if res is None:
+                sov_map = await esi_client.get_sov_map_cached()
+                if sov_map is None:
                     raise HTTPException(
-                        status_code=502, detail="Upstream service unavailable"
+                        status_code=503, detail="Sovereignty data warming up"
                     )
-                result = SovResponse(
-                    claimed=True,
-                    # alliance_id/corporation_id are int when the corresponding info tuple is truthy;
-                    # cast() is a zero-cost type hint, no runtime effect.
-                    alliance=(
-                        GroupInfo(
-                            id=cast(int, alliance_id),
-                            name=alliance_info[0],
-                            ticker=alliance_info[1],
+                system = sov_map.get(solar_system_id)
+                if system is None:
+                    result = SovResponse(claimed=False)
+                else:
+                    alliance_id: int | None = system.get("alliance_id")
+                    corporation_id: int | None = system.get("corporation_id")
+                    if alliance_id is None and corporation_id is None:
+                        result = SovResponse(claimed=False)
+                    else:
+                        try:
+                            alliance_info, corporation_info = await asyncio.gather(
+                                (
+                                    esi_client.get_alliance_info(alliance_id)
+                                    if alliance_id
+                                    else asyncio.sleep(0, result=None)
+                                ),
+                                (
+                                    esi_client.get_corporation_info(corporation_id)
+                                    if corporation_id
+                                    else asyncio.sleep(0, result=None)
+                                ),
+                            )
+                        except RuntimeError:
+                            logger.exception("ESI upstream call failed")
+                            raise HTTPException(
+                                status_code=502, detail="Upstream service unavailable"
+                            )
+                        result = SovResponse(
+                            claimed=True,
+                            # alliance_id/corporation_id are int when the corresponding info tuple is truthy;
+                            # cast() is a zero-cost type hint, no runtime effect.
+                            alliance=(
+                                GroupInfo(
+                                    id=cast(int, alliance_id),
+                                    name=alliance_info[0],
+                                    ticker=alliance_info[1],
+                                )
+                                if alliance_info
+                                else None
+                            ),
+                            corporation=(
+                                GroupInfo(
+                                    id=cast(int, corporation_id),
+                                    name=corporation_info[0],
+                                    ticker=corporation_info[1],
+                                )
+                                if corporation_info
+                                else None
+                            ),
                         )
-                        if alliance_info
-                        else None
-                    ),
-                    corporation=(
-                        GroupInfo(
-                            id=cast(int, corporation_id),
-                            name=corporation_info[0],
-                            ticker=corporation_info[1],
-                        )
-                        if corporation_info
-                        else None
-                    ),
+                res = await query_cache.set(
+                    "sov",
+                    cache_params,
+                    result.model_dump_json(exclude_none=True),
+                    ttl=config.cache.sov_ttl,
                 )
-        cached = result.model_dump_json(exclude_none=True)
-        await query_cache.set("sov", cache_params, cached, ttl=config.cache.sov_ttl)
-    assert cached is not None
+    etag, gzipped, body = res
     return json_cache_response(
-        cached, max_age=config.cache.sov_ttl, if_none_match=if_none_match
+        body, gzipped, etag, config.cache.sov_ttl, if_none_match
     )
 
 
