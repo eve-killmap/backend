@@ -72,3 +72,28 @@ def test_sov_graceful_degradation_returns_200(monkeypatch):
     resp = asyncio.run(main.get_system_sov(30000300, if_none_match=None))
     assert resp.status_code == 200
     assert b"claimed" in resp.body
+
+
+def test_rankings_serves_gzipped_when_large(monkeypatch):
+    import gzip
+
+    async def fake_get(prefix, params):
+        raw = b'{"top":[],"bottom":[]}'
+        return '"rank"', True, gzip.compress(raw, 6)
+
+    monkeypatch.setattr(main.query_cache, "get", fake_get)
+    resp = asyncio.run(main.get_system_rankings(limit=10, if_none_match=None))
+    assert resp.status_code == 200
+    assert resp.headers["Content-Encoding"] == "gzip"
+    assert resp.headers["ETag"] == '"rank"'
+    assert resp.headers["Cache-Control"] == f"public, max-age={main.config.cache.rankings_ttl}"
+
+
+def test_farthest_kill_304_on_matching_etag(monkeypatch):
+    async def fake_get(prefix, params):
+        return '"far"', False, b'{"farthest_kill":-1}'
+
+    monkeypatch.setattr(main.query_cache, "get", fake_get)
+    resp = asyncio.run(main.get_farthest_kill(30000142, if_none_match='"far"'))
+    assert resp.status_code == 304
+    assert resp.headers["Cache-Control"] == f"public, max-age={main.config.cache.farthest_kill_ttl}"

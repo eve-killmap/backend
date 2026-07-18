@@ -599,23 +599,23 @@ async def get_system_rankings(
 ):
     """Get rank list of solar systems by highest/lowest number of kills."""
     cache_params = {"limit": limit}
-    cached = await query_cache.get("system_rankings", cache_params)
-    if cached is None:
+    res = await query_cache.get("system_rankings", cache_params)
+    if res is None:
         async with single_flight.lock(f"system_rankings:{limit}"):
-            cached = await query_cache.get("system_rankings", cache_params)
-            if cached is None:
+            res = await query_cache.get("system_rankings", cache_params)
+            if res is None:
                 top = await fetch_top_systems(limit=limit)
                 bottom = await fetch_bottom_systems(limit=limit)
                 result = RankSystemsResponse(top=top, bottom=bottom)
-                cached = result.model_dump_json()
-                await query_cache.set(
+                res = await query_cache.set(
                     "system_rankings",
                     cache_params,
-                    cached,
+                    result.model_dump_json(),
                     ttl=config.cache.rankings_ttl,
                 )
+    etag, gzipped, body = res
     return json_cache_response(
-        cached, max_age=config.cache.rankings_ttl, if_none_match=if_none_match
+        body, gzipped, etag, config.cache.rankings_ttl, if_none_match
     )
 
 
@@ -627,24 +627,24 @@ async def get_farthest_kill(
     """Get the distance from (0, 0, 0) to the farthest kill in the solar system.
     Returns -1 if the solar system has no kills."""
     cache_params = {"solar_system_id": solar_system_id}
-    cached = await query_cache.get("farthest_kill", cache_params)
-    if cached is None:
+    res = await query_cache.get("farthest_kill", cache_params)
+    if res is None:
         async with single_flight.lock(f"farthest_kill:{solar_system_id}"):
-            cached = await query_cache.get("farthest_kill", cache_params)
-            if cached is None:
+            res = await query_cache.get("farthest_kill", cache_params)
+            if res is None:
                 value = normalize_farthest_kill(
                     await fetch_farthest_kill(solar_system_id)
                 )
-                cached = FarthestKillResponse(farthest_kill=value).model_dump_json()
-                await query_cache.set(
+                result = FarthestKillResponse(farthest_kill=value)
+                res = await query_cache.set(
                     "farthest_kill",
                     cache_params,
-                    cached,
+                    result.model_dump_json(),
                     ttl=config.cache.farthest_kill_ttl,
                 )
-    assert cached is not None
+    etag, gzipped, body = res
     return json_cache_response(
-        cached, max_age=config.cache.farthest_kill_ttl, if_none_match=if_none_match
+        body, gzipped, etag, config.cache.farthest_kill_ttl, if_none_match
     )
 
 
