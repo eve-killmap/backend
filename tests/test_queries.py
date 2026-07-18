@@ -61,3 +61,24 @@ def test_get_kill_details_cached_hit_metric(monkeypatch):
     resp = asyncio.run(queries.get_kill_details_cached([42]))
     assert resp.count == 1
     assert _sample("eve_killmap_cache_hits_total", {"cache": "kill_details"}) - h0 == 1
+
+
+class _FakeDbCapture:
+    def __init__(self, value):
+        self._value = value
+        self.query = None
+
+    async def fetchval(self, query, *args):
+        self.query = query
+        return self._value
+
+
+def test_fetch_system_latest_inserted_floors_epoch(monkeypatch):
+    # The freshness boundary must never round UP past the true MAX(inserted_time),
+    # or delta-polling would skip a same-second kill. Guard against a silent revert
+    # to a bare ::BIGINT cast.
+    fake = _FakeDbCapture(1700000000)
+    monkeypatch.setattr(queries, "db", fake)
+    result = asyncio.run(queries.fetch_system_latest_inserted(30000142))
+    assert result == 1700000000
+    assert "FLOOR(EXTRACT(EPOCH FROM MAX(inserted_time)))" in fake.query

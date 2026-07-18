@@ -126,8 +126,12 @@ async def fetch_kills_by_ids(killmail_ids: list[int]) -> RawKillDetailResponse:
 
 
 async def fetch_system_latest_inserted(solar_system_id: int) -> int | None:
+    # FLOOR (not a bare ::BIGINT cast, which rounds to nearest): the returned epoch
+    # becomes the client-facing X-Kills-Fresh-To / next `since`. Rounding UP past the
+    # true MAX(inserted_time) would make the next poll skip a kill inserted in the same
+    # second; flooring keeps the boundary at-or-below the true max (safe overlap).
     return await db.fetchval(
-        "SELECT EXTRACT(EPOCH FROM MAX(inserted_time))::BIGINT FROM kills WHERE solar_system_id = $1",
+        "SELECT FLOOR(EXTRACT(EPOCH FROM MAX(inserted_time)))::BIGINT FROM kills WHERE solar_system_id = $1",
         solar_system_id,
     )
 
