@@ -1,13 +1,17 @@
 import asyncio
 import hashlib
 import json
+import logging
 import time
 
 import redis.asyncio as aioredis
+from redis.exceptions import RedisError
 
 from app.config import config
 from app.metrics import metrics
 from app import prometheus_metrics as pm
+
+logger = logging.getLogger(__name__)
 
 
 def _hash_params(params: dict) -> str:
@@ -29,8 +33,16 @@ class QueryCache:
         if self._redis is None:
             return None
         _start = time.perf_counter()
-        value = await self._redis.get(f"query:{prefix}:{_hash_params(params)}")
-        pm.redis_command_seconds.labels(op="get").observe(time.perf_counter() - _start)
+        try:
+            value = await self._redis.get(f"query:{prefix}:{_hash_params(params)}")
+        except RedisError as exc:
+            pm.errors.labels(component="cache").inc()
+            logger.warning("Cache get failed for %s; treating as miss: %s", prefix, exc)
+            return None
+        finally:
+            pm.redis_command_seconds.labels(op="get").observe(
+                time.perf_counter() - _start
+            )
         if value is None:
             metrics.cache_misses += 1
             pm.cache_misses.labels(cache=prefix).inc()
@@ -47,8 +59,18 @@ class QueryCache:
             return
         ttl = config.cache.query_ttl if ttl is None else ttl
         _start = time.perf_counter()
-        await self._redis.set(f"query:{prefix}:{_hash_params(params)}", value, ex=ttl)
-        pm.redis_command_seconds.labels(op="set").observe(time.perf_counter() - _start)
+        try:
+            await self._redis.set(
+                f"query:{prefix}:{_hash_params(params)}", value, ex=ttl
+            )
+        except RedisError as exc:
+            pm.errors.labels(component="cache").inc()
+            logger.warning("Cache set failed for %s; skipping: %s", prefix, exc)
+            return
+        finally:
+            pm.redis_command_seconds.labels(op="set").observe(
+                time.perf_counter() - _start
+            )
 
 
 class KillsBinaryCache:
@@ -64,8 +86,16 @@ class KillsBinaryCache:
         if self._redis is None:
             return None
         _start = time.perf_counter()
-        val = await self._redis.get(f"kills:binary:{_hash_params(params)}")
-        pm.redis_command_seconds.labels(op="get").observe(time.perf_counter() - _start)
+        try:
+            val = await self._redis.get(f"kills:binary:{_hash_params(params)}")
+        except RedisError as exc:
+            pm.errors.labels(component="cache").inc()
+            logger.warning("Binary cache get failed; treating as miss: %s", exc)
+            return None
+        finally:
+            pm.redis_command_seconds.labels(op="get").observe(
+                time.perf_counter() - _start
+            )
         if val is None:
             metrics.cache_misses += 1
             pm.cache_misses.labels(cache="binary").inc()
@@ -79,10 +109,18 @@ class KillsBinaryCache:
         if self._redis is None:
             return
         _start = time.perf_counter()
-        await self._redis.set(
-            f"kills:binary:{_hash_params(params)}", value, ex=config.cache.binary_ttl
-        )
-        pm.redis_command_seconds.labels(op="set").observe(time.perf_counter() - _start)
+        try:
+            await self._redis.set(
+                f"kills:binary:{_hash_params(params)}", value, ex=config.cache.binary_ttl
+            )
+        except RedisError as exc:
+            pm.errors.labels(component="cache").inc()
+            logger.warning("Binary cache set failed; skipping: %s", exc)
+            return
+        finally:
+            pm.redis_command_seconds.labels(op="set").observe(
+                time.perf_counter() - _start
+            )
 
 
 class SingleFlight:
@@ -114,14 +152,23 @@ async def get_system_latest(solar_system_id: int) -> int | None:
     if query_cache._redis is None:
         return None
     key = f"kills:system_latest:{solar_system_id}"
-    cached = await query_cache._redis.get(key)
+    try:
+        cached = await query_cache._redis.get(key)
+    except RedisError as exc:
+        pm.errors.labels(component="cache").inc()
+        logger.warning("system_latest cache get failed; querying DB: %s", exc)
+        cached = None
     if cached is not None:
         return int(cached)
     from app.queries import fetch_system_latest_inserted
 
     latest = await fetch_system_latest_inserted(solar_system_id)
     if latest is not None:
-        await query_cache._redis.set(
-            key, str(latest), ex=config.cache.system_latest_ttl
-        )
+        try:
+            await query_cache._redis.set(
+                key, str(latest), ex=config.cache.system_latest_ttl
+            )
+        except RedisError as exc:
+            pm.errors.labels(component="cache").inc()
+            logger.warning("system_latest cache set failed; skipping: %s", exc)
     return latest

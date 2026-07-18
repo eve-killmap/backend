@@ -59,6 +59,20 @@ from app.queries import (
 logger = logging.getLogger(__name__)
 
 
+def _build_cache_client(decode_responses: bool) -> aioredis.Redis:
+    pool = aioredis.BlockingConnectionPool.from_url(
+        config.redis_cache_url,
+        decode_responses=decode_responses,
+        max_connections=config.cache_redis.max_connections,
+        timeout=config.cache_redis.pool_timeout,
+        socket_connect_timeout=config.cache_redis.socket_connect_timeout,
+        socket_timeout=config.cache_redis.socket_timeout,
+        socket_keepalive=config.cache_redis.socket_keepalive,
+        health_check_interval=config.cache_redis.health_check_interval,
+    )
+    return aioredis.Redis(connection_pool=pool)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     setup_logging(config)
@@ -68,10 +82,8 @@ async def lifespan(_app: FastAPI):
         uv_log.propagate = True
     await db.connect()
     if config.redis_cache_url:
-        cache_redis = aioredis.from_url(config.redis_cache_url, decode_responses=True)
-        cache_redis_bytes = aioredis.from_url(
-            config.redis_cache_url, decode_responses=False
-        )
+        cache_redis = _build_cache_client(decode_responses=True)
+        cache_redis_bytes = _build_cache_client(decode_responses=False)
         await esi_client.startup(cache_redis)
         queries.set_redis(cache_redis)
         query_cache.set_redis(cache_redis)

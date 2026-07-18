@@ -214,3 +214,38 @@ def test_leader_election_true_explicit(tmp_path):
         base_dir=tmp_path,
     )
     assert cfg.leader_election is True
+
+
+def test_cache_redis_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    cr = cfg.cache_redis
+    assert cr.max_connections == 200
+    assert cr.pool_timeout == 5
+    assert cr.socket_connect_timeout == 5
+    assert cr.socket_timeout == 10
+    assert cr.socket_keepalive is True
+    assert cr.health_check_interval == 30
+
+
+def test_cache_redis_overrides(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path,
+        "cache_redis:\n  max_connections: 500\n  pool_timeout: 3\n"
+        "  socket_keepalive: false\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.cache_redis.max_connections == 500
+    assert cfg.cache_redis.pool_timeout == 3
+    assert cfg.cache_redis.socket_keepalive is False
+
+
+def test_cache_redis_keepalive_not_bool_raises(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "cache_redis:\n  socket_keepalive: maybe\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_cache_redis_bad_int_raises(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "cache_redis:\n  max_connections: 0\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)

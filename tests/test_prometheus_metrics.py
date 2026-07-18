@@ -55,7 +55,7 @@ def test_singletons_accept_calls():
             pm.entity_lookups.labels(kind=kind, result=result).inc()
     for result in ("resolved", "stub", "absent"):
         pm.war_lookups.labels(result=result).inc()
-    for component in ("esi", "broadcaster", "invalidation"):
+    for component in ("esi", "broadcaster", "invalidation", "cache"):
         pm.errors.labels(component=component).inc()
 
 

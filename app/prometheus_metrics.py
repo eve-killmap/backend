@@ -34,7 +34,7 @@ _BYTE_BUCKETS = (0, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576)
 errors = Counter(
     "eve_killmap_errors",
     "Unhandled errors swallowed in a handler/loop, by component.",
-    ["component"],  # esi|broadcaster|invalidation
+    ["component"],  # esi|broadcaster|invalidation|cache
 )
 service_start_timestamp = Gauge(
     "eve_killmap_service_start_timestamp_seconds",

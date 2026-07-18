@@ -70,6 +70,16 @@ class CacheConfig:
 
 
 @dataclass(frozen=True)
+class CacheRedisConfig:
+    max_connections: int
+    pool_timeout: int
+    socket_connect_timeout: int
+    socket_timeout: int
+    socket_keepalive: bool
+    health_check_interval: int
+
+
+@dataclass(frozen=True)
 class StreamingConfig:
     stream_name: str
     pubsub_channel: str
@@ -103,6 +113,7 @@ class Config:
     cors: CorsConfig
     database: DatabaseConfig
     cache: CacheConfig
+    cache_redis: CacheRedisConfig
     streaming: StreamingConfig
     health: HealthConfig
     limits: LimitsConfig
@@ -183,6 +194,7 @@ def load_config(
     cors_cfg = _section(data, "cors")
     db_cfg = _section(data, "database")
     cache_cfg = _section(data, "cache")
+    cache_redis_cfg = _section(data, "cache_redis")
     stream_cfg = _section(data, "streaming")
     health_cfg = _section(data, "health")
     limits_cfg = _section(data, "limits")
@@ -282,6 +294,36 @@ def load_config(
         ),
     )
 
+    cache_redis_keepalive = cache_redis_cfg.get("socket_keepalive", True)
+    if not isinstance(cache_redis_keepalive, bool):
+        raise ConfigError("Config value 'cache_redis.socket_keepalive' must be a boolean")
+    cache_redis_config = CacheRedisConfig(
+        max_connections=_as_int(
+            cache_redis_cfg.get("max_connections", 200),
+            "cache_redis.max_connections",
+            minimum=1,
+        ),
+        pool_timeout=_as_int(
+            cache_redis_cfg.get("pool_timeout", 5), "cache_redis.pool_timeout", minimum=1
+        ),
+        socket_connect_timeout=_as_int(
+            cache_redis_cfg.get("socket_connect_timeout", 5),
+            "cache_redis.socket_connect_timeout",
+            minimum=1,
+        ),
+        socket_timeout=_as_int(
+            cache_redis_cfg.get("socket_timeout", 10),
+            "cache_redis.socket_timeout",
+            minimum=1,
+        ),
+        socket_keepalive=cache_redis_keepalive,
+        health_check_interval=_as_int(
+            cache_redis_cfg.get("health_check_interval", 30),
+            "cache_redis.health_check_interval",
+            minimum=1,
+        ),
+    )
+
     streaming_config = StreamingConfig(
         stream_name=stream_cfg.get("stream_name", "kills:live"),
         pubsub_channel=stream_cfg.get("pubsub_channel", "kills:enriched"),
@@ -350,6 +392,7 @@ def load_config(
         cors=cors_config,
         database=database_config,
         cache=cache_config,
+        cache_redis=cache_redis_config,
         streaming=streaming_config,
         health=health_config,
         limits=limits_config,

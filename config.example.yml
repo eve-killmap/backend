@@ -43,6 +43,18 @@ cache:
   kill_detail_processed_ttl: 3600   # processed kill detail
   system_latest_ttl: 10     # per-system MAX(inserted_time) short-circuit cache
 
+cache_redis:
+  # Connection pool for the response/ESI cache Redis (REDIS_CACHE_URL). A blocking
+  # pool: when all connections are busy, a request waits up to pool_timeout for a
+  # free one instead of erroring. On any Redis error (timeout, pool exhaustion,
+  # connection loss) the cache degrades to a DB read rather than failing the request.
+  max_connections: 200        # per-worker cap on concurrent cache-Redis connections
+  pool_timeout: 5             # seconds a request waits for a free connection
+  socket_connect_timeout: 5   # seconds to establish a connection
+  socket_timeout: 10          # seconds to wait on a read/write
+  socket_keepalive: true
+  health_check_interval: 30   # seconds between idle-connection health checks
+
 streaming:
   # Cross-app contract names shared with process-kills. Do not change without
   # updating process-kills in lockstep.

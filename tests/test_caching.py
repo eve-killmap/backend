@@ -153,3 +153,41 @@ def test_esi_corp_cache_hit_metric():
         _sample("eve_killmap_esi_cache_hits_total", {"entity": "corporation"}) - h0
         == 1
     )
+
+
+from redis.exceptions import RedisError  # noqa: E402
+
+
+class _FakeRedisRaising:
+    async def get(self, key):
+        raise RedisError("boom")
+
+    async def set(self, *a, **k):
+        raise RedisError("boom")
+
+
+def test_query_cache_get_degrades_on_redis_error():
+    from app.cache import QueryCache
+
+    qc = QueryCache(); qc.set_redis(_FakeRedisRaising())
+    e0 = _sample("eve_killmap_errors_total", {"component": "cache"})
+    result = asyncio.run(qc.get("sov", {"a": 1}))  # must not raise
+    assert result is None
+    assert _sample("eve_killmap_errors_total", {"component": "cache"}) - e0 == 1
+
+
+def test_query_cache_set_degrades_on_redis_error():
+    from app.cache import QueryCache
+
+    qc = QueryCache(); qc.set_redis(_FakeRedisRaising())
+    e0 = _sample("eve_killmap_errors_total", {"component": "cache"})
+    asyncio.run(qc.set("sov", {"a": 1}, "value", ttl=10))  # must not raise
+    assert _sample("eve_killmap_errors_total", {"component": "cache"}) - e0 == 1
+
+
+def test_binary_cache_get_degrades_on_redis_error():
+    from app.cache import KillsBinaryCache
+
+    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisRaising())
+    result = asyncio.run(kbc.get({"a": 1}))  # must not raise
+    assert result is None
