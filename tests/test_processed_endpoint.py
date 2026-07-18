@@ -97,3 +97,32 @@ def test_processed_serves_from_cache_hit(monkeypatch):
     resp = asyncio.run(main.get_kill_details_processed(9, if_none_match=None))
     assert resp.body == b'{"attackers":1}'
     assert resp.headers["ETag"] == '"hit"'
+
+
+def test_raw_details_sets_etag_and_max_age(monkeypatch):
+    from app.models import RawKillDetailResponse
+
+    async def fake_cached(ids):
+        return RawKillDetailResponse(count=0, kills=[])
+
+    monkeypatch.setattr(main, "get_kill_details_cached", fake_cached)
+    resp = asyncio.run(main.get_kill_details("1,2,3", if_none_match=None))
+    assert resp.status_code == 200
+    assert resp.headers["Cache-Control"] == f"public, max-age={main.config.cache.kill_detail_ttl}"
+    assert resp.headers["ETag"].startswith('"')
+    assert "Content-Encoding" not in resp.headers  # compression left to middleware
+
+
+def test_raw_details_304_on_matching_etag(monkeypatch):
+    from app.models import RawKillDetailResponse
+    from app.http_cache import compute_etag
+
+    payload = RawKillDetailResponse(count=0, kills=[])
+
+    async def fake_cached(ids):
+        return payload
+
+    monkeypatch.setattr(main, "get_kill_details_cached", fake_cached)
+    etag = compute_etag(payload.model_dump_json().encode("utf-8"))
+    resp = asyncio.run(main.get_kill_details("1", if_none_match=etag))
+    assert resp.status_code == 304

@@ -240,22 +240,28 @@ async def health_detail(authorization: Annotated[str | None, Header()] = None):
     )
 
 
-@app.get(
-    "/kills/details/raw",
-    response_model=RawKillDetailResponse,
-)
+@app.get("/kills/details/raw", response_model=None)
 async def get_kill_details(
     killmail_ids: Annotated[
         str,
         Query(description="Comma-separated list of killmail IDs to fetch details for"),
     ],
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ):
     """Get raw, unprocessed kill details for a list of killmail IDs."""
     ids_list = _parse_killmail_ids(killmail_ids)
     error = validate_id_list(ids_list, config.limits.max_killmail_ids)
     if error is not None:
         raise HTTPException(status_code=400, detail=error)
-    return await get_kill_details_cached(ids_list)
+    result = await get_kill_details_cached(ids_list)
+    json_bytes = result.model_dump_json().encode("utf-8")
+    return json_cache_response(
+        json_bytes,
+        gzipped=False,
+        etag=compute_etag(json_bytes),
+        max_age=config.cache.kill_detail_ttl,
+        if_none_match=if_none_match,
+    )
 
 
 @app.get("/kills/details/processed", response_model=None)
