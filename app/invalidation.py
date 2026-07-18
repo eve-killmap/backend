@@ -11,9 +11,9 @@ from app import prometheus_metrics as pm
 logger = logging.getLogger(__name__)
 
 INVALIDATION_PATTERNS = {
-    "system_rankings": "query:system_rankings:*",
-    "farthest_kill": "query:farthest_kill:*",
-    "sov": "query:sov:*",
+    "system_rankings": "query:v2:system_rankings:*",
+    "farthest_kill": "query:v2:farthest_kill:*",
+    "sov": "query:v2:sov:*",
 }
 
 

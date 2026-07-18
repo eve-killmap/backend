@@ -6,9 +6,9 @@ from app.invalidation import patterns_for_targets
 
 
 def test_patterns_for_known_targets():
-    assert patterns_for_targets(["system_rankings"]) == ["query:system_rankings:*"]
+    assert patterns_for_targets(["system_rankings"]) == ["query:v2:system_rankings:*"]
     out = patterns_for_targets(["sov", "farthest_kill"])
-    assert set(out) == {"query:sov:*", "query:farthest_kill:*"}
+    assert set(out) == {"query:v2:sov:*", "query:v2:farthest_kill:*"}
 
 
 def test_patterns_ignores_unknown():
@@ -69,14 +69,14 @@ def test_subscriber_subscribes_on_bus_and_deletes_on_cache():
     msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
     pubsub = _FakePubSub([{"type": "subscribe"}, msg])
     bus = _FakeBus(pubsub)
-    cache = _FakeCache(["query:sov:abc", "query:sov:def", "query:system_rankings:x"])
+    cache = _FakeCache(["query:v2:sov:abc", "query:v2:sov:def", "query:v2:system_rankings:x"])
 
     asyncio.run(invalidation.subscriber_loop(bus, cache, "cache:invalidate"))
 
     # Subscription happened on the bus connection...
     assert pubsub.subscribed == "cache:invalidate"
     # ...and only the matching sov keys were deleted, on the CACHE connection.
-    assert set(cache.deleted) == {"query:sov:abc", "query:sov:def"}
+    assert set(cache.deleted) == {"query:v2:sov:abc", "query:v2:sov:def"}
     # ...and the subscriber cleaned up on exit.
     assert pubsub.unsubscribed == "cache:invalidate"
     assert pubsub.closed is True
@@ -85,7 +85,7 @@ def test_subscriber_subscribes_on_bus_and_deletes_on_cache():
 def test_subscriber_ignores_unknown_targets():
     msg = {"type": "message", "data": json.dumps({"targets": ["bogus"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:sov:abc"])
+    cache = _FakeCache(["query:v2:sov:abc"])
 
     asyncio.run(
         invalidation.subscriber_loop(_FakeBus(pubsub), cache, "cache:invalidate")
@@ -98,7 +98,7 @@ def test_subscriber_skips_malformed_message():
     # A non-JSON payload must be logged + skipped, never raised, and never delete.
     bad = {"type": "message", "data": "not json{"}
     pubsub = _FakePubSub([bad])
-    cache = _FakeCache(["query:sov:abc"])
+    cache = _FakeCache(["query:v2:sov:abc"])
 
     asyncio.run(
         invalidation.subscriber_loop(_FakeBus(pubsub), cache, "cache:invalidate")
@@ -119,7 +119,7 @@ def _sample(name, labels=None):
 def test_subscriber_records_received_and_evicted_metrics():
     msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:sov:a", "query:sov:b"])
+    cache = _FakeCache(["query:v2:sov:a", "query:v2:sov:b"])
 
     r0 = _sample("eve_killmap_cache_invalidations_received_total", {"target": "sov"})
     e0 = _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"})
