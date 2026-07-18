@@ -99,12 +99,14 @@ class KillsBinaryCache:
     def set_redis(self, redis: aioredis.Redis) -> None:
         self._redis = redis
 
-    async def get(self, params: dict) -> bytes | None:
+    async def get(self, params: dict) -> tuple[int, bool, bytes] | None:
         if self._redis is None:
             return None
         _start = time.perf_counter()
         try:
-            val = await self._redis.get(f"kills:binary:{_hash_params(params)}")
+            val = await self._redis.get(
+                f"kills:binary:{BINARY_KEY_VERSION}:{_hash_params(params)}"
+            )
         except RedisError as exc:
             pm.errors.labels(component="cache").inc()
             logger.warning("Binary cache get failed; treating as miss: %s", exc)
@@ -119,25 +121,35 @@ class KillsBinaryCache:
             return None
         metrics.cache_hits += 1
         pm.cache_hits.labels(cache="binary").inc()
-        # Redis may return str when decode_responses=True; normalise to bytes.
-        return val.encode() if isinstance(val, str) else val
+        if isinstance(val, str):
+            val = val.encode()
+        gzipped = val[0] == 1
+        fresh_to = struct.unpack(">Q", val[1:9])[0]
+        body = val[9:]
+        return fresh_to, gzipped, body
 
-    async def set(self, params: dict, value: bytes) -> None:
+    async def set(
+        self, params: dict, value: bytes, fresh_to: int
+    ) -> tuple[int, bool, bytes]:
+        body, gzipped = await gzip_if_large(value)
         if self._redis is None:
-            return
+            return fresh_to, gzipped, body
+        frame = bytes([1 if gzipped else 0]) + struct.pack(">Q", fresh_to) + body
         _start = time.perf_counter()
         try:
             await self._redis.set(
-                f"kills:binary:{_hash_params(params)}", value, ex=config.cache.binary_ttl
+                f"kills:binary:{BINARY_KEY_VERSION}:{_hash_params(params)}",
+                frame,
+                ex=config.cache.binary_ttl,
             )
         except RedisError as exc:
             pm.errors.labels(component="cache").inc()
             logger.warning("Binary cache set failed; skipping: %s", exc)
-            return
         finally:
             pm.redis_command_seconds.labels(op="set").observe(
                 time.perf_counter() - _start
             )
+        return fresh_to, gzipped, body
 
 
 class SingleFlight:

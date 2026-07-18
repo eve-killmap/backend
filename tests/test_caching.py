@@ -191,15 +191,6 @@ def test_query_cache_set_times_op():
     assert _sample("eve_killmap_redis_command_seconds_count", {"op": "set"}) - s0 == 1
 
 
-def test_binary_cache_uses_binary_label():
-    from app.cache import KillsBinaryCache
-
-    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisGet(None))
-    m0 = _sample("eve_killmap_cache_misses_total", {"cache": "binary"})
-    asyncio.run(kbc.get({"a": 1}))
-    assert _sample("eve_killmap_cache_misses_total", {"cache": "binary"}) - m0 == 1
-
-
 def test_esi_corp_cache_hit_metric():
     from app.esi import EsiClient
     import json as _json
@@ -248,9 +239,68 @@ def test_query_cache_set_degrades_but_returns_body():
     assert _sample("eve_killmap_errors_total", {"component": "cache"}) - e0 == 1
 
 
+import struct as _struct
+
+
+def _binary_frame(body: bytes, *, fresh_to: int, gzipped: bool = False) -> bytes:
+    return bytes([1 if gzipped else 0]) + _struct.pack(">Q", fresh_to) + body
+
+
+def test_binary_cache_hit_returns_fresh_to_and_body():
+    from app.cache import KillsBinaryCache
+
+    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisGet(_binary_frame(b"\x01\x02", fresh_to=1234)))
+    res = asyncio.run(kbc.get({"solar_system_id": 1}))
+    assert res is not None
+    fresh_to, gzipped, body = res
+    assert fresh_to == 1234
+    assert gzipped is False
+    assert body == b"\x01\x02"
+
+
+def test_binary_cache_miss_uses_binary_label():
+    from app.cache import KillsBinaryCache
+
+    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisGet(None))
+    m0 = _sample("eve_killmap_cache_misses_total", {"cache": "binary"})
+    assert asyncio.run(kbc.get({"a": 1})) is None
+    assert _sample("eve_killmap_cache_misses_total", {"cache": "binary"}) - m0 == 1
+
+
+def test_binary_cache_set_frames_and_gzips_large():
+    import gzip as _gzip
+    from app.cache import KillsBinaryCache
+
+    store = _FakeRedisStore()
+    kbc = KillsBinaryCache(); kbc.set_redis(store)
+    payload = b"k" * 5000
+    fresh_to, gzipped, body = asyncio.run(kbc.set({"solar_system_id": 1}, payload, 999))
+    assert fresh_to == 999
+    assert gzipped is True
+    assert _gzip.decompress(body) == payload
+    (frame,) = store.stored.values()
+    assert frame[0] == 1
+    assert _struct.unpack(">Q", frame[1:9])[0] == 999
+
+
+def test_binary_cache_set_small_stays_raw():
+    from app.cache import KillsBinaryCache
+
+    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisStore())
+    fresh_to, gzipped, body = asyncio.run(kbc.set({"solar_system_id": 1}, b"small", 42))
+    assert (fresh_to, gzipped, body) == (42, False, b"small")
+
+
 def test_binary_cache_get_degrades_on_redis_error():
     from app.cache import KillsBinaryCache
 
     kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisRaising())
-    result = asyncio.run(kbc.get({"a": 1}))  # must not raise
-    assert result is None
+    assert asyncio.run(kbc.get({"a": 1})) is None
+
+
+def test_binary_cache_set_degrades_but_returns_body():
+    from app.cache import KillsBinaryCache
+
+    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisRaising())
+    res = asyncio.run(kbc.set({"a": 1}, b"payload", 7))  # must not raise
+    assert res == (7, False, b"payload")
