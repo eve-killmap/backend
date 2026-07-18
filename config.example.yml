@@ -31,7 +31,7 @@ database:
 cache:
   # All values are TTLs in seconds for the Redis cache layer.
   query_ttl: 300            # generic query response cache
-  binary_ttl: 60            # per-system binary kills payload (since=None)
+  binary_ttl: 300           # per-system binary kills payload (since=None); cached once per TTL
   type_name_ttl: 2592000    # DB type-name lookups (30 days)
   esi_corp_ttl: 86400       # ESI corporation info (1 day)
   esi_alliance_ttl: 86400   # ESI alliance info (1 day)

@@ -254,7 +254,7 @@ def load_config(
             cache_cfg.get("query_ttl", 300), "cache.query_ttl", minimum=1
         ),
         binary_ttl=_as_int(
-            cache_cfg.get("binary_ttl", 60), "cache.binary_ttl", minimum=1
+            cache_cfg.get("binary_ttl", 300), "cache.binary_ttl", minimum=1
         ),
         type_name_ttl=_as_int(
             cache_cfg.get("type_name_ttl", 2592000), "cache.type_name_ttl", minimum=1

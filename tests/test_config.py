@@ -45,7 +45,7 @@ def test_defaults_reproduce_behavior(tmp_path):
     assert cfg.database.pool_min_size == 5
     assert cfg.database.pool_max_size == 20
     assert cfg.cache.query_ttl == 300
-    assert cfg.cache.binary_ttl == 60
+    assert cfg.cache.binary_ttl == 300
     assert cfg.streaming.stream_name == "kills:live"
     assert cfg.streaming.invalidate_channel == "cache:invalidate"
     assert cfg.limits.max_killmail_ids == 100
