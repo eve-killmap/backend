@@ -19,6 +19,9 @@ SERVICE_VERSION = "1.0.0"
 
 VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
+# Uvicorn installs handlers on these and pins uvicorn.access to INFO.
+UVICORN_LOGGER_NAMES = ("uvicorn", "uvicorn.error", "uvicorn.access")
+
 # Generic, PII-free default. Operators MUST override USER_AGENT in .env with a
 # real contact per CCP's API rules.
 _DEFAULT_USER_AGENT = (
@@ -422,6 +425,23 @@ def require_database_url(config: Config) -> str:
     return config.database_url
 
 
+def configure_uvicorn_loggers(level: str) -> None:
+    """Route uvicorn's records through the root handlers at ``level``.
+
+    Uvicorn owns handlers on its loggers and pins ``uvicorn.access`` to INFO.
+    Clearing the handlers and enabling propagation is not enough to honour the
+    configured level: when a record propagates, Python checks only the
+    *originating* logger's level and the ancestors' handler levels -- the root
+    logger's level is never consulted. Without setting the level here,
+    ``uvicorn.access`` keeps emitting INFO request lines under LOG_LEVEL=WARNING.
+    """
+    for name in UVICORN_LOGGER_NAMES:
+        uv_log = logging.getLogger(name)
+        uv_log.handlers = []
+        uv_log.propagate = True
+        uv_log.setLevel(level)
+
+
 def setup_logging(config: Config) -> None:
     """Configure root logging from ``config`` (idempotent)."""
     root_logger = logging.getLogger()
@@ -444,11 +464,18 @@ def setup_logging(config: Config) -> None:
         backupCount=config.logging.backup_count,
     )
     file_handler.setFormatter(formatter)
+    # Handlers carry the level too: records propagated from third-party loggers
+    # bypass the root logger's level entirely, so the handlers are the only
+    # place that can filter them.
+    file_handler.setLevel(config.logging.level)
     root_logger.addHandler(file_handler)
 
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
+    console_handler.setLevel(config.logging.level)
     root_logger.addHandler(console_handler)
+
+    configure_uvicorn_loggers(config.logging.level)
 
 
 # Module-level singleton: loaded once from .env + config.yml for normal app use.

@@ -76,11 +76,7 @@ def _build_cache_client(decode_responses: bool) -> aioredis.Redis:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    setup_logging(config)
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-        uv_log = logging.getLogger(name)
-        uv_log.handlers = []
-        uv_log.propagate = True
+    setup_logging(config)  # also re-points uvicorn's loggers at our handlers/level
     await db.connect()
     if config.redis_cache_url:
         cache_redis = _build_cache_client(decode_responses=True)

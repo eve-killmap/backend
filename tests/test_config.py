@@ -1,8 +1,40 @@
+import logging
 from pathlib import Path
 
 import pytest
 
-from app.config import ConfigError, load_config, require_database_url, worker_log_file
+from app.config import (
+    UVICORN_LOGGER_NAMES,
+    ConfigError,
+    configure_uvicorn_loggers,
+    load_config,
+    require_database_url,
+    setup_logging,
+    worker_log_file,
+)
+
+
+@pytest.fixture
+def restore_logging():
+    """Snapshot/restore global logging state so these tests don't leak."""
+    root = logging.getLogger()
+    saved_root = (root.level, root.handlers[:])
+    saved_uv = {
+        name: (
+            logging.getLogger(name).level,
+            logging.getLogger(name).handlers[:],
+            logging.getLogger(name).propagate,
+        )
+        for name in UVICORN_LOGGER_NAMES
+    }
+    yield
+    root.setLevel(saved_root[0])
+    root.handlers = saved_root[1]
+    for name, (level, handlers, propagate) in saved_uv.items():
+        log = logging.getLogger(name)
+        log.setLevel(level)
+        log.handlers = handlers
+        log.propagate = propagate
 
 
 def _write_yaml(tmp_path: Path, text: str) -> Path:
@@ -111,6 +143,57 @@ def test_cors_comma_string_parsed_as_list(tmp_path):
     )
     cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
     assert cfg.cors.allow_origins == ["https://a.example", "https://b.example"]
+
+
+def test_configure_uvicorn_loggers_applies_level(restore_logging):
+    # Reproduce uvicorn's own setup: its loggers own handlers, don't propagate,
+    # and uvicorn.access is pinned to INFO.
+    access = logging.getLogger("uvicorn.access")
+    access.setLevel(logging.INFO)
+    access.handlers = [logging.NullHandler()]
+    access.propagate = False
+
+    configure_uvicorn_loggers("WARNING")
+
+    assert access.handlers == []
+    assert access.propagate is True
+    assert access.level == logging.WARNING
+    # The reported bug: access records must not be emitted at INFO under WARNING.
+    # A propagated record is checked against the *originating* logger's level,
+    # never the root's, so this level is what actually suppresses them.
+    assert access.isEnabledFor(logging.INFO) is False
+    assert access.isEnabledFor(logging.WARNING) is True
+
+
+def test_configure_uvicorn_loggers_covers_all_uvicorn_loggers(restore_logging):
+    configure_uvicorn_loggers("ERROR")
+    for name in UVICORN_LOGGER_NAMES:
+        log = logging.getLogger(name)
+        assert log.level == logging.ERROR, name
+        assert log.propagate is True, name
+        assert log.handlers == [], name
+
+
+def test_configure_uvicorn_loggers_debug_still_allows_info(restore_logging):
+    configure_uvicorn_loggers("DEBUG")
+    assert logging.getLogger("uvicorn.access").isEnabledFor(logging.INFO) is True
+
+
+def test_setup_logging_applies_level_to_handlers_and_uvicorn(tmp_path, restore_logging):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"LOG_LEVEL": "WARNING", "LOG_FILE": "app.log"},
+        base_dir=tmp_path,
+    )
+    setup_logging(cfg)
+
+    root = logging.getLogger()
+    assert root.level == logging.WARNING
+    assert root.handlers, "expected file + console handlers"
+    # Handlers must carry the level too: propagated third-party records bypass
+    # the root logger's level and are filtered only by the handlers.
+    assert all(h.level == logging.WARNING for h in root.handlers)
+    assert logging.getLogger("uvicorn.access").isEnabledFor(logging.INFO) is False
 
 
 def test_cors_expose_headers_default(tmp_path):
