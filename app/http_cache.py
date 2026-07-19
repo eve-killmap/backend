@@ -13,6 +13,9 @@ def not_modified(if_none_match: str | None, etag: str) -> bool:
     return if_none_match is not None and if_none_match.strip() == etag
 
 
+# We set Vary: Accept-Encoding ONLY when we set Content-Encoding ourselves.
+# For an uncompressed body GZipMiddleware compresses it downstream and adds its
+# own Vary; setting it here too would emit a duplicate `Vary` header.
 def json_cache_response(
     body: bytes,
     gzipped: bool,
@@ -23,8 +26,9 @@ def json_cache_response(
     headers = {
         "ETag": etag,
         "Cache-Control": f"public, max-age={max_age}",
-        "Vary": "Accept-Encoding",
     }
+    if gzipped:
+        headers["Vary"] = "Accept-Encoding"
     if not_modified(if_none_match, etag):
         return Response(status_code=304, headers=headers)
     if gzipped:
@@ -41,9 +45,9 @@ def binary_cache_response(
     """Kills full payload: cache-once, pre-compressed, no ETag (see design §4)."""
     headers = {
         "Cache-Control": f"public, max-age={max_age}",
-        "Vary": "Accept-Encoding",
         "X-Kills-Fresh-To": str(fresh_to),
     }
     if gzipped:
+        headers["Vary"] = "Accept-Encoding"
         headers["Content-Encoding"] = "gzip"
     return Response(content=body, media_type="application/octet-stream", headers=headers)

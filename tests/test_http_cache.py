@@ -22,7 +22,10 @@ def test_not_modified_matches():
     assert not_modified('"nope"', etag) is False
 
 
-def test_json_cache_response_headers_uncompressed():
+# Vary is set by the helper ONLY when it sets Content-Encoding itself. For an
+# uncompressed body, GZipMiddleware compresses it downstream and adds its own
+# Vary: Accept-Encoding — setting it here too would duplicate the header.
+def test_json_cache_response_uncompressed_omits_vary():
     body = b'{"a":1}'
     etag = compute_etag(body)
     resp = json_cache_response(body, gzipped=False, etag=etag, max_age=60, if_none_match=None)
@@ -30,43 +33,54 @@ def test_json_cache_response_headers_uncompressed():
     assert resp.body == body
     assert resp.headers["ETag"] == etag
     assert resp.headers["Cache-Control"] == "public, max-age=60"
-    assert resp.headers["Vary"] == "Accept-Encoding"
+    assert "Vary" not in resp.headers
     assert "Content-Encoding" not in resp.headers
 
 
-def test_json_cache_response_sets_content_encoding_when_gzipped():
+def test_json_cache_response_gzipped_sets_content_encoding_and_vary():
     raw = b'{"a":1}'
     gz = gzip.compress(raw, 6)
     resp = json_cache_response(gz, gzipped=True, etag=compute_etag(raw), max_age=60, if_none_match=None)
     assert resp.headers["Content-Encoding"] == "gzip"
+    assert resp.headers["Vary"] == "Accept-Encoding"
     assert resp.body == gz
 
 
-def test_json_cache_response_304_carries_cache_headers():
+def test_json_cache_response_304_uncompressed_omits_vary():
     body = b'{"a":1}'
     etag = compute_etag(body)
     resp = json_cache_response(body, gzipped=False, etag=etag, max_age=60, if_none_match=etag)
     assert resp.status_code == 304
     assert resp.headers["ETag"] == etag
     assert resp.headers["Cache-Control"] == "public, max-age=60"
-    assert resp.headers["Vary"] == "Accept-Encoding"
+    assert "Vary" not in resp.headers
     assert "Content-Encoding" not in resp.headers
 
 
-def test_binary_cache_response_has_fresh_to_and_no_etag():
+def test_json_cache_response_304_gzipped_carries_vary():
+    body = b'{"a":1}'
+    etag = compute_etag(body)
+    resp = json_cache_response(body, gzipped=True, etag=etag, max_age=60, if_none_match=etag)
+    assert resp.status_code == 304
+    assert resp.headers["Vary"] == "Accept-Encoding"
+    assert "Content-Encoding" not in resp.headers  # 304 has no body
+
+
+def test_binary_cache_response_uncompressed_omits_vary():
     body = b"\x00\x01\x02"
     resp = binary_cache_response(body, gzipped=False, max_age=300, fresh_to=1700000000)
     assert resp.status_code == 200
     assert resp.body == body
     assert resp.headers["X-Kills-Fresh-To"] == "1700000000"
     assert resp.headers["Cache-Control"] == "public, max-age=300"
-    assert resp.headers["Vary"] == "Accept-Encoding"
+    assert "Vary" not in resp.headers
     assert "ETag" not in resp.headers
     assert "Content-Encoding" not in resp.headers
 
 
-def test_binary_cache_response_content_encoding_when_gzipped():
+def test_binary_cache_response_gzipped_sets_content_encoding_and_vary():
     gz = gzip.compress(b"payload", 6)
     resp = binary_cache_response(gz, gzipped=True, max_age=300, fresh_to=5)
     assert resp.headers["Content-Encoding"] == "gzip"
+    assert resp.headers["Vary"] == "Accept-Encoding"
     assert resp.headers["X-Kills-Fresh-To"] == "5"
