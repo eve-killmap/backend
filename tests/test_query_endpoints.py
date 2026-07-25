@@ -97,3 +97,54 @@ def test_farthest_kill_304_on_matching_etag(monkeypatch):
     resp = asyncio.run(main.get_farthest_kill(30000142, if_none_match='"far"'))
     assert resp.status_code == 304
     assert resp.headers["Cache-Control"] == f"public, max-age={main.config.cache.farthest_kill_ttl}"
+
+
+def test_system_kills_serves_from_cache_hit(monkeypatch):
+    async def fake_get(prefix, params):
+        return '"sk"', False, (
+            b'{"system_ids":[1],"all":[5],"day":[1],"week":[2],'
+            b'"month":[3],"six_months":[3],"year":[4]}'
+        )
+
+    monkeypatch.setattr(main.query_cache, "get", fake_get)
+    resp = asyncio.run(main.get_system_kills_stats(if_none_match=None))
+    assert resp.status_code == 200
+    assert b'"system_ids"' in resp.body
+    assert resp.headers["ETag"] == '"sk"'
+    # cached exactly like system-rankings -> same TTL
+    assert resp.headers["Cache-Control"] == f"public, max-age={main.config.cache.rankings_ttl}"
+
+
+def test_system_kills_single_flight_builds_once(monkeypatch):
+    from app.models import SystemKillsResponse
+
+    calls = []
+    store = {}
+
+    async def fake_get(prefix, params):
+        return store.get("sk")
+
+    async def fake_set(prefix, params, value, ttl=None):
+        res = ('"e"', False, value.encode())
+        store["sk"] = res
+        return res
+
+    async def fake_fetch():
+        calls.append(1)
+        await asyncio.sleep(0.02)
+        return SystemKillsResponse(
+            system_ids=[1], all=[5], day=[1], week=[2], month=[3], six_months=[3], year=[4]
+        )
+
+    monkeypatch.setattr(main.query_cache, "get", fake_get)
+    monkeypatch.setattr(main.query_cache, "set", fake_set)
+    monkeypatch.setattr(main, "fetch_system_kills", fake_fetch)
+
+    async def go():
+        return await asyncio.gather(
+            *[main.get_system_kills_stats(if_none_match=None) for _ in range(6)]
+        )
+
+    resps = asyncio.run(go())
+    assert len(calls) == 1
+    assert all(r.status_code == 200 for r in resps)

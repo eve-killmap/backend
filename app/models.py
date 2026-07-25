@@ -108,6 +108,16 @@ class RankSystemsResponse(BaseModel):
     bottom: list[RankSystem]
 
 
+class SystemKillsResponse(BaseModel):
+    system_ids: list[int]
+    all: list[int]
+    day: list[int]
+    week: list[int]
+    month: list[int]
+    six_months: list[int]
+    year: list[int]
+
+
 class FarthestKillResponse(BaseModel):
     farthest_kill: int
 

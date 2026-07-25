@@ -82,3 +82,49 @@ def test_fetch_system_latest_inserted_floors_epoch(monkeypatch):
     result = asyncio.run(queries.fetch_system_latest_inserted(30000142))
     assert result == 1700000000
     assert "FLOOR(EXTRACT(EPOCH FROM MAX(inserted_time)))" in fake.query
+
+
+class _FakeDbFetch:
+    def __init__(self, rows):
+        self._rows = rows
+        self.query = None
+
+    async def fetch(self, query, *args):
+        self.query = query
+        return self._rows
+
+
+def test_fetch_system_kills_aligns_and_defaults(monkeypatch):
+    # Index i in every array must belong to system_ids[i]; a windowed view that
+    # lacks a system contributes 0 (COALESCE in SQL), never a shifted/dropped cell.
+    rows = [
+        {"solar_system_id": 30000142, "all_count": 100, "day_count": 5,
+         "week_count": 20, "month_count": 60, "six_months_count": 80, "year_count": 90},
+        {"solar_system_id": 30002187, "all_count": 3, "day_count": 0,
+         "week_count": 0, "month_count": 1, "six_months_count": 2, "year_count": 3},
+    ]
+    fake = _FakeDbFetch(rows)
+    monkeypatch.setattr(queries, "db", fake)
+    result = asyncio.run(queries.fetch_system_kills())
+
+    assert result.system_ids == [30000142, 30002187]
+    assert result.all == [100, 3]
+    assert result.day == [5, 0]
+    assert result.week == [20, 0]
+    assert result.month == [60, 1]
+    assert result.six_months == [80, 2]
+    assert result.year == [90, 3]
+    # every column is the same length as system_ids
+    assert {len(result.all), len(result.day), len(result.week), len(result.month),
+            len(result.six_months), len(result.year)} == {len(result.system_ids)}
+
+    # Guard the SQL shape that makes alignment structural.
+    q = fake.query
+    assert "FROM mv_kills_per_system" in q
+    for view in ("mv_kills_per_system_24h", "mv_kills_per_system_7d",
+                 "mv_kills_per_system_30d", "mv_kills_per_system_6m",
+                 "mv_kills_per_system_1y"):
+        assert view in q, view
+    assert "LEFT JOIN" in q.upper()
+    assert "COALESCE" in q.upper()
+    assert "ORDER BY" in q.upper()

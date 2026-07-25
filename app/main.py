@@ -47,6 +47,7 @@ from app.queries import (
     fetch_raw_kills,
     fetch_top_systems,
     fetch_bottom_systems,
+    fetch_system_kills,
     fetch_farthest_kill,
     fetch_kills_by_ids,
     get_type_names,
@@ -647,6 +648,32 @@ async def get_system_rankings(
                 result = RankSystemsResponse(top=top, bottom=bottom)
                 res = await query_cache.set(
                     "system_rankings",
+                    cache_params,
+                    result.model_dump_json(),
+                    ttl=config.cache.rankings_ttl,
+                )
+    etag, gzipped, body = res
+    return json_cache_response(
+        body, gzipped, etag, config.cache.rankings_ttl, if_none_match
+    )
+
+
+@app.get("/stats/system-kills", response_model=None)
+async def get_system_kills_stats(
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
+):
+    """Per-system kill counts across time windows as index-aligned columns:
+    index i of every array (all/day/week/month/six_months/year) belongs to
+    system_ids[i]. Cached like /stats/system-rankings (same TTL)."""
+    cache_params: dict = {}
+    res = await query_cache.get("system_kills", cache_params)
+    if res is None:
+        async with single_flight.lock("system_kills"):
+            res = await query_cache.get("system_kills", cache_params)
+            if res is None:
+                result = await fetch_system_kills()
+                res = await query_cache.set(
+                    "system_kills",
                     cache_params,
                     result.model_dump_json(),
                     ttl=config.cache.rankings_ttl,
