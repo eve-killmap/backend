@@ -345,3 +345,10 @@ def test_cache_redis_bad_int_raises(tmp_path):
     yaml_path = _write_yaml(tmp_path, "cache_redis:\n  max_connections: 0\n")
     with pytest.raises(ConfigError):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_filter_limits_have_defaults():
+    from app.config import load_config
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.limits.max_filter_conditions == 8
+    assert cfg.limits.max_filter_ids_per_condition == 50

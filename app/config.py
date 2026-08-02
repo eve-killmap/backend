@@ -102,6 +102,8 @@ class LimitsConfig:
     max_killmail_ids: int
     max_name_ids: int
     max_ws_connections: int
+    max_filter_conditions: int
+    max_filter_ids_per_condition: int
 
 
 @dataclass(frozen=True)
@@ -371,6 +373,14 @@ def load_config(
             limits_cfg.get("max_ws_connections", 1000),
             "limits.max_ws_connections",
             minimum=1,
+        ),
+        max_filter_conditions=_as_int(
+            limits_cfg.get("max_filter_conditions", 8),
+            "limits.max_filter_conditions", minimum=1,
+        ),
+        max_filter_ids_per_condition=_as_int(
+            limits_cfg.get("max_filter_ids_per_condition", 50),
+            "limits.max_filter_ids_per_condition", minimum=1,
         ),
     )
 
