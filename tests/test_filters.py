@@ -62,3 +62,54 @@ def test_validation_errors():
         parse_filter([f"alliance:victim:{','.join(str(i) for i in range(1, 52))}"], **L)  # >max_ids
     with pytest.raises(FilterError):
         parse_filter([f"war:{i}" for i in range(1, 10)], **L)  # >max_conditions
+
+
+from app.filters import build_map_sql, build_system_sql
+
+M = dict(max_conditions=8, max_ids=50)
+
+
+def test_map_single_condition_sql():
+    f = parse_filter(["alliance:attacker:99005338"], **M)
+    sql, params = build_map_sql(f)
+    assert "FROM kill_facets" in sql
+    assert "GROUP BY solar_system_id" in sql
+    assert "COUNT(DISTINCT killmail_id)" in sql
+    assert "FILTER (WHERE killmail_time > now()-interval '24 hours')" in sql
+    assert "facet_value = ANY($2::bigint[])" in sql
+    assert params == [3, [99005338], 1]          # kind, values, role
+
+
+def test_map_war_any_has_no_value_param():
+    sql, params = build_map_sql(parse_filter(["war:any"], **M))
+    assert "facet_value" not in sql
+    assert params == [7]
+
+
+def test_map_multi_condition_uses_driver_and_exists():
+    # character (rank 0) is more selective than ship (rank 4) -> character drives
+    f = parse_filter(["ship:attacker:670", "character:victim:12345"], **M)
+    sql, params = build_map_sql(f)
+    assert "FROM kill_facets f" in sql
+    assert "EXISTS (SELECT 1 FROM kill_facets g" in sql
+    assert "g.killmail_id = f.killmail_id" in sql
+    # driver params come first: character kind=1, value, role=0
+    assert params[0] == 1 and params[1] == [12345] and params[2] == 0
+
+
+def test_system_single_condition_sql():
+    f = parse_filter(["character:involved:12345"], **M)
+    sql, params = build_system_sql(f, 30000142)
+    assert "SELECT DISTINCT killmail_id" in sql
+    assert "solar_system_id = $" in sql
+    assert "role" not in sql        # involved omits role
+    assert 30000142 in params
+
+
+def test_system_multi_condition_sql():
+    f = parse_filter(["ship:attacker:670", "character:victim:12345"], **M)
+    sql, params = build_system_sql(f, 30000142)
+    assert "SELECT DISTINCT f.killmail_id" in sql
+    assert "f.solar_system_id = $" in sql
+    assert "EXISTS (SELECT 1 FROM kill_facets g" in sql
+    assert 30000142 in params

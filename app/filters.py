@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 ATTRIBUTE_KINDS = {
     "character": 1, "corporation": 2, "alliance": 3,
@@ -96,3 +96,118 @@ def parse_filter(raw: list[str], *, max_conditions: int, max_ids: int) -> Filter
     if len(unique) > max_conditions:
         raise FilterError(f"too many conditions (>{max_conditions})")
     return Filter(conditions=unique)
+
+
+# lower rank = more selective -> better driver. Tunable.
+DRIVER_RANK = {1: 0, 2: 1, 3: 2, 6: 3, 5: 4, 4: 5, 7: 6}
+
+_BUCKETS = (
+    ("all_count", None),
+    ("day_count", "24 hours"),
+    ("week_count", "7 days"),
+    ("month_count", "30 days"),
+    ("six_months_count", "6 months"),
+    ("year_count", "1 year"),
+)
+
+
+def _bucket_sql(time_col: str) -> str:
+    lines = []
+    for alias, interval in _BUCKETS:
+        if interval is None:
+            lines.append(f"COUNT(DISTINCT killmail_id) AS {alias}")
+        else:
+            lines.append(
+                f"COUNT(DISTINCT killmail_id) "
+                f"FILTER (WHERE {time_col} > now()-interval '{interval}') AS {alias}"
+            )
+    return ",\n          ".join(lines)
+
+
+def _pred(cond: Condition, params: list, alias: str = "") -> str:
+    """Append this condition's params and return its SQL predicate."""
+    p = f"{alias}." if alias else ""
+    parts: list[str] = []
+    params.append(cond.facet_kind)
+    parts.append(f"{p}facet_kind = ${len(params)}")
+    if not cond.war_any:
+        params.append(list(cond.values))
+        parts.append(f"{p}facet_value = ANY(${len(params)}::bigint[])")
+    if cond.role is not None:
+        params.append(cond.role)
+        parts.append(f"{p}role = ${len(params)}")
+    return " AND ".join(parts)
+
+
+def _exists(cond: Condition, params: list) -> str:
+    inner = _pred(cond, params, alias="g")
+    return (
+        "EXISTS (SELECT 1 FROM kill_facets g "
+        f"WHERE g.killmail_id = f.killmail_id AND {inner})"
+    )
+
+
+def _split_driver(f: Filter) -> tuple[Condition, list[Condition]]:
+    driver_i = min(
+        range(len(f.conditions)),
+        key=lambda i: DRIVER_RANK[f.conditions[i].facet_kind],
+    )
+    driver = f.conditions[driver_i]
+    others = [c for j, c in enumerate(f.conditions) if j != driver_i]
+    return driver, others
+
+
+def build_map_sql(f: Filter) -> tuple[str, list]:
+    params: list = []
+    if len(f.conditions) == 1:
+        where = _pred(f.conditions[0], params)
+        sql = f"""
+        SELECT solar_system_id,
+          {_bucket_sql("killmail_time")}
+        FROM kill_facets
+        WHERE {where}
+        GROUP BY solar_system_id
+        """
+        return sql, params
+
+    driver, others = _split_driver(f)
+    where = _pred(driver, params, alias="f")
+    exists_sql = "\n            AND ".join(_exists(c, params) for c in others)
+    sql = f"""
+        SELECT solar_system_id,
+          {_bucket_sql("m.killmail_time")}
+        FROM (
+          SELECT f.killmail_id, f.solar_system_id, f.killmail_time
+          FROM kill_facets f
+          WHERE {where}
+            AND {exists_sql}
+        ) m
+        GROUP BY solar_system_id
+        """
+    return sql, params
+
+
+def build_system_sql(f: Filter, solar_system_id: int) -> tuple[str, list]:
+    params: list = []
+    if len(f.conditions) == 1:
+        where = _pred(f.conditions[0], params)
+        params.append(solar_system_id)
+        sql = f"""
+        SELECT DISTINCT killmail_id
+        FROM kill_facets
+        WHERE {where} AND solar_system_id = ${len(params)}
+        """
+        return sql, params
+
+    driver, others = _split_driver(f)
+    where = _pred(driver, params, alias="f")
+    params.append(solar_system_id)
+    system_clause = f"f.solar_system_id = ${len(params)}"
+    exists_sql = "\n            AND ".join(_exists(c, params) for c in others)
+    sql = f"""
+        SELECT DISTINCT f.killmail_id
+        FROM kill_facets f
+        WHERE {where} AND {system_clause}
+            AND {exists_sql}
+        """
+    return sql, params
