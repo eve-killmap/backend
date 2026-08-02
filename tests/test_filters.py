@@ -59,6 +59,6 @@ def test_validation_errors():
     with pytest.raises(FilterError):
         parse_filter(["alliance:victim:"], **L)        # missing ids
     with pytest.raises(FilterError):
-        parse_filter([f"alliance:victim:{','.join(str(i) for i in range(51))}"], **L)  # >max_ids
+        parse_filter([f"alliance:victim:{','.join(str(i) for i in range(1, 52))}"], **L)  # >max_ids
     with pytest.raises(FilterError):
-        parse_filter([f"war:{i}" for i in range(9)], **L)  # >max_conditions
+        parse_filter([f"war:{i}" for i in range(1, 10)], **L)  # >max_conditions
