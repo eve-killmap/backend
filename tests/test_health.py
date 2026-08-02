@@ -123,17 +123,17 @@ def test_aggregate_workers_not_degraded_when_no_expectation():
 
 def test_health_detail_404_when_token_unset(monkeypatch):
     import asyncio
-    import app.main as main
+    import app.routers.health as health_router
     import app.config
     from fastapi import HTTPException
 
-    # config is a frozen dataclass; patch the reference main uses.
+    # config is a frozen dataclass; patch the reference health_router uses.
     class _Cfg:
         health_token = None
 
-    monkeypatch.setattr(main, "config", _Cfg())
+    monkeypatch.setattr(health_router, "config", _Cfg())
     try:
-        asyncio.run(main.health_detail(authorization=None))
+        asyncio.run(health_router.health_detail(authorization=None))
         assert False, "expected HTTPException"
     except HTTPException as exc:
         assert exc.status_code == 404
@@ -141,7 +141,7 @@ def test_health_detail_404_when_token_unset(monkeypatch):
 
 def test_health_check_503_body_is_generic(monkeypatch):
     import asyncio
-    import app.main as main
+    import app.routers.health as health_router
     from app.database import db
     import app.health as health
     from fastapi import HTTPException
@@ -153,7 +153,7 @@ def test_health_check_503_body_is_generic(monkeypatch):
     monkeypatch.setattr(health, "redis_ok", _no)
 
     try:
-        asyncio.run(main.health_check())
+        asyncio.run(health_router.health_check())
         assert False, "expected HTTPException"
     except HTTPException as exc:
         assert exc.status_code == 503

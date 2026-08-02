@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from app.main import _parse_killmail_ids
+from app.routers.kills import _parse_killmail_ids
 
 
 def test_parse_valid_ids():
@@ -16,11 +16,11 @@ def test_parse_invalid_ids_raises_400():
 
 def test_get_kill_details_rejects_non_positive(monkeypatch):
     import asyncio
-    import app.main as main
+    import app.routers.kills as kills
     from fastapi import HTTPException
 
     try:
-        asyncio.run(main.get_kill_details(killmail_ids="1,-5"))
+        asyncio.run(kills.get_kill_details(killmail_ids="1,-5"))
         assert False, "expected HTTPException"
     except HTTPException as exc:
         assert exc.status_code == 400
@@ -83,7 +83,7 @@ class _FakeWS:
 
 def test_ws_guard_rejected_origin_metric():
     import asyncio
-    from app.main import _ws_guard
+    from app.routers.ws import _ws_guard
 
     ws = _FakeWS("https://evil.example")
     r0 = _sample(
@@ -124,24 +124,24 @@ def test_main_no_war_esi_reference():
 
 def test_universe_names_uses_types(monkeypatch):
     import asyncio
-    import app.main as main
+    import app.routers.universe as universe
 
     async def fake_types(ids):
         return {587: "Rifter"}
 
-    monkeypatch.setattr(main, "get_type_names", fake_types)
-    out = asyncio.run(main.resolve_universe_names([587]))
+    monkeypatch.setattr(universe, "get_type_names", fake_types)
+    out = asyncio.run(universe.resolve_universe_names([587]))
     assert out == {587: "Rifter"}
 
 
 def test_universe_names_rejects_over_cap():
     import asyncio
-    import app.main as main
+    import app.routers.universe as universe
     from fastapi import HTTPException
 
-    too_many = list(range(main.config.limits.max_name_ids + 1))
+    too_many = list(range(universe.config.limits.max_name_ids + 1))
     try:
-        asyncio.run(main.resolve_universe_names(too_many))
+        asyncio.run(universe.resolve_universe_names(too_many))
         assert False, "expected HTTPException"
     except HTTPException as exc:
         assert exc.status_code == 400

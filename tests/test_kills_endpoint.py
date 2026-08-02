@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-import app.main as main
+import app.routers.systems as systems
 
 
 def _columns(ids):
@@ -49,15 +49,15 @@ def _patch(monkeypatch, *, latest, fake_cache, fetch_counter=None, latest_seq=No
             fetch_counter.append(1)
         return _columns([1, 2, 3])
 
-    monkeypatch.setattr(main, "get_system_latest", fake_latest)
-    monkeypatch.setattr(main, "fetch_raw_kills", fake_fetch)
-    monkeypatch.setattr(main, "kills_binary_cache", fake_cache)
+    monkeypatch.setattr(systems, "get_system_latest", fake_latest)
+    monkeypatch.setattr(systems, "fetch_raw_kills", fake_fetch)
+    monkeypatch.setattr(systems, "kills_binary_cache", fake_cache)
 
 
 def test_full_path_builds_once_and_sets_headers(monkeypatch):
     cache = _FakeBinaryCache()
     _patch(monkeypatch, latest=1500, fake_cache=cache)
-    resp = asyncio.run(main.get_system_kills(30009001, since=None))
+    resp = asyncio.run(systems.get_system_kills(30009001, since=None))
     assert resp.headers["X-Kills-Fresh-To"] == "1500"
     assert resp.headers["Cache-Control"] == "public, max-age=300"
     assert "ETag" not in resp.headers
@@ -69,8 +69,8 @@ def test_full_path_fresh_to_is_build_time_across_hits(monkeypatch):
     # First call sees latest=1500 and stores it; a later call would see 9999 live,
     # but the cached fresh_to must remain 1500.
     _patch(monkeypatch, latest=9999, fake_cache=cache, latest_seq=[1500])
-    r1 = asyncio.run(main.get_system_kills(30009002, since=None))
-    r2 = asyncio.run(main.get_system_kills(30009002, since=None))
+    r1 = asyncio.run(systems.get_system_kills(30009002, since=None))
+    r2 = asyncio.run(systems.get_system_kills(30009002, since=None))
     assert r1.headers["X-Kills-Fresh-To"] == "1500"
     assert r2.headers["X-Kills-Fresh-To"] == "1500"
 
@@ -87,12 +87,12 @@ def test_full_path_single_flight_collapses_builds(monkeypatch):
     async def fake_latest(_sid):
         return 1500
 
-    monkeypatch.setattr(main, "get_system_latest", fake_latest)
-    monkeypatch.setattr(main, "fetch_raw_kills", slow_fetch)
-    monkeypatch.setattr(main, "kills_binary_cache", cache)
+    monkeypatch.setattr(systems, "get_system_latest", fake_latest)
+    monkeypatch.setattr(systems, "fetch_raw_kills", slow_fetch)
+    monkeypatch.setattr(systems, "kills_binary_cache", cache)
 
     async def go():
-        return await asyncio.gather(*[main.get_system_kills(30009003, since=None) for _ in range(8)])
+        return await asyncio.gather(*[systems.get_system_kills(30009003, since=None) for _ in range(8)])
 
     resps = asyncio.run(go())
     assert len(calls) == 1
@@ -108,7 +108,7 @@ def test_poll_path_is_no_store_and_never_touches_cache(monkeypatch):
             raise AssertionError("poll path must not write the binary cache")
 
     _patch(monkeypatch, latest=2000, fake_cache=_Boom())
-    resp = asyncio.run(main.get_system_kills(30009004, since=100))
+    resp = asyncio.run(systems.get_system_kills(30009004, since=100))
     assert resp.headers["Cache-Control"] == "no-store"
     assert resp.headers["X-Kills-Fresh-To"] == "2000"
 
@@ -116,7 +116,7 @@ def test_poll_path_is_no_store_and_never_touches_cache(monkeypatch):
 def test_short_circuit_returns_empty_no_store(monkeypatch):
     cache = _FakeBinaryCache()
     _patch(monkeypatch, latest=100, fake_cache=cache)
-    resp = asyncio.run(main.get_system_kills(30009005, since=100))  # since >= latest
+    resp = asyncio.run(systems.get_system_kills(30009005, since=100))  # since >= latest
     assert resp.headers["Cache-Control"] == "no-store"
     assert resp.headers["X-Kills-Fresh-To"] == "100"
     # empty payload = 4-byte row count of 0
@@ -128,6 +128,6 @@ def test_full_path_empty_system_uses_wallclock(monkeypatch):
     cache = _FakeBinaryCache()
     _patch(monkeypatch, latest=None, fake_cache=cache)  # no kills → fresh_to = now
     before = int(time.time())
-    resp = asyncio.run(main.get_system_kills(30009006, since=None))
+    resp = asyncio.run(systems.get_system_kills(30009006, since=None))
     after = int(time.time())
     assert before <= int(resp.headers["X-Kills-Fresh-To"]) <= after

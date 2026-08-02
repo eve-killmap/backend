@@ -1,6 +1,8 @@
 import asyncio
 
-import app.main as main
+import app.routers.stats as stats
+import app.routers.systems as systems
+from app.config import config
 from app.cache import QueryCache
 
 
@@ -23,12 +25,12 @@ def test_sov_serves_from_cache_hit(monkeypatch):
         etag = '"deadbeef"'
         return etag, False, b'{"claimed":false}'
 
-    monkeypatch.setattr(main.query_cache, "get", fake_get)
-    resp = asyncio.run(main.get_system_sov(30000142, if_none_match=None))
+    monkeypatch.setattr(systems.query_cache, "get", fake_get)
+    resp = asyncio.run(systems.get_system_sov(30000142, if_none_match=None))
     assert resp.status_code == 200
     assert resp.body == b'{"claimed":false}'
     assert resp.headers["ETag"] == '"deadbeef"'
-    assert resp.headers["Cache-Control"] == f"public, max-age={main.config.cache.sov_ttl}"
+    assert resp.headers["Cache-Control"] == f"public, max-age={config.cache.sov_ttl}"
 
 
 def test_sov_single_flight_builds_once(monkeypatch):
@@ -48,12 +50,12 @@ def test_sov_single_flight_builds_once(monkeypatch):
         await asyncio.sleep(0.02)
         return {}  # unclaimed → SovResponse(claimed=False)
 
-    monkeypatch.setattr(main.query_cache, "get", fake_get)
-    monkeypatch.setattr(main.query_cache, "set", fake_set)
-    monkeypatch.setattr(main.esi_client, "get_sov_map_cached", fake_map)
+    monkeypatch.setattr(systems.query_cache, "get", fake_get)
+    monkeypatch.setattr(systems.query_cache, "set", fake_set)
+    monkeypatch.setattr(systems.esi_client, "get_sov_map_cached", fake_map)
 
     async def go():
-        return await asyncio.gather(*[main.get_system_sov(30000200, if_none_match=None) for _ in range(6)])
+        return await asyncio.gather(*[systems.get_system_sov(30000200, if_none_match=None) for _ in range(6)])
 
     resps = asyncio.run(go())
     assert len(calls) == 1
@@ -63,13 +65,13 @@ def test_sov_single_flight_builds_once(monkeypatch):
 def test_sov_graceful_degradation_returns_200(monkeypatch):
     # Real QueryCache backed by a raising Redis → get None, set returns body anyway.
     qc = QueryCache(); qc.set_redis(_FakeRedisRaising())
-    monkeypatch.setattr(main, "query_cache", qc)
+    monkeypatch.setattr(systems, "query_cache", qc)
 
     async def fake_map():
         return {}
 
-    monkeypatch.setattr(main.esi_client, "get_sov_map_cached", fake_map)
-    resp = asyncio.run(main.get_system_sov(30000300, if_none_match=None))
+    monkeypatch.setattr(systems.esi_client, "get_sov_map_cached", fake_map)
+    resp = asyncio.run(systems.get_system_sov(30000300, if_none_match=None))
     assert resp.status_code == 200
     assert b"claimed" in resp.body
 
@@ -81,22 +83,22 @@ def test_rankings_serves_gzipped_when_large(monkeypatch):
         raw = b'{"top":[],"bottom":[]}'
         return '"rank"', True, gzip.compress(raw, 6)
 
-    monkeypatch.setattr(main.query_cache, "get", fake_get)
-    resp = asyncio.run(main.get_system_rankings(limit=10, if_none_match=None))
+    monkeypatch.setattr(stats.query_cache, "get", fake_get)
+    resp = asyncio.run(stats.get_system_rankings(limit=10, if_none_match=None))
     assert resp.status_code == 200
     assert resp.headers["Content-Encoding"] == "gzip"
     assert resp.headers["ETag"] == '"rank"'
-    assert resp.headers["Cache-Control"] == f"public, max-age={main.config.cache.rankings_ttl}"
+    assert resp.headers["Cache-Control"] == f"public, max-age={config.cache.rankings_ttl}"
 
 
 def test_farthest_kill_304_on_matching_etag(monkeypatch):
     async def fake_get(prefix, params):
         return '"far"', False, b'{"farthest_kill":-1}'
 
-    monkeypatch.setattr(main.query_cache, "get", fake_get)
-    resp = asyncio.run(main.get_farthest_kill(30000142, if_none_match='"far"'))
+    monkeypatch.setattr(systems.query_cache, "get", fake_get)
+    resp = asyncio.run(systems.get_farthest_kill(30000142, if_none_match='"far"'))
     assert resp.status_code == 304
-    assert resp.headers["Cache-Control"] == f"public, max-age={main.config.cache.farthest_kill_ttl}"
+    assert resp.headers["Cache-Control"] == f"public, max-age={config.cache.farthest_kill_ttl}"
 
 
 def test_system_kills_serves_from_cache_hit(monkeypatch):
@@ -106,13 +108,13 @@ def test_system_kills_serves_from_cache_hit(monkeypatch):
             b'"month":[3],"six_months":[3],"year":[4]}'
         )
 
-    monkeypatch.setattr(main.query_cache, "get", fake_get)
-    resp = asyncio.run(main.get_system_kills_stats(if_none_match=None))
+    monkeypatch.setattr(stats.query_cache, "get", fake_get)
+    resp = asyncio.run(stats.get_system_kills_stats(if_none_match=None))
     assert resp.status_code == 200
     assert b'"system_ids"' in resp.body
     assert resp.headers["ETag"] == '"sk"'
     # cached exactly like system-rankings -> same TTL
-    assert resp.headers["Cache-Control"] == f"public, max-age={main.config.cache.rankings_ttl}"
+    assert resp.headers["Cache-Control"] == f"public, max-age={config.cache.rankings_ttl}"
 
 
 def test_system_kills_single_flight_builds_once(monkeypatch):
@@ -136,13 +138,13 @@ def test_system_kills_single_flight_builds_once(monkeypatch):
             system_ids=[1], all=[5], day=[1], week=[2], month=[3], six_months=[3], year=[4]
         )
 
-    monkeypatch.setattr(main.query_cache, "get", fake_get)
-    monkeypatch.setattr(main.query_cache, "set", fake_set)
-    monkeypatch.setattr(main, "fetch_system_kills", fake_fetch)
+    monkeypatch.setattr(stats.query_cache, "get", fake_get)
+    monkeypatch.setattr(stats.query_cache, "set", fake_set)
+    monkeypatch.setattr(stats, "fetch_system_kills", fake_fetch)
 
     async def go():
         return await asyncio.gather(
-            *[main.get_system_kills_stats(if_none_match=None) for _ in range(6)]
+            *[stats.get_system_kills_stats(if_none_match=None) for _ in range(6)]
         )
 
     resps = asyncio.run(go())
