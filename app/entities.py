@@ -88,6 +88,49 @@ def _participant(corp_id, alliance_id, ships_killed, corp_info, alliance_info) -
     )
 
 
+_WAR_COLUMNS = (
+    "war_id, declared, started, finished, retracted, mutual, "
+    "aggressor_corporation_id, aggressor_alliance_id, "
+    "defender_corporation_id, defender_alliance_id, "
+    "ally_corporation_ids, ally_alliance_ids"
+)
+
+
+async def search_wars(
+    aggressor: tuple[str, int] | None,
+    defender: tuple[str, int] | None,
+    limit: int,
+) -> list[asyncpg.Record]:
+    """Wars where `aggressor` is on the aggressor side and/or `defender` is on
+    the defender/ally side. Each side is (kind, id) with kind in
+    {'alliance','corporation'}. At least one side must be given (caller enforces)."""
+    clauses: list[str] = []
+    params: list = []
+
+    if aggressor is not None:
+        kind, aid = aggressor
+        col = "aggressor_alliance_id" if kind == "alliance" else "aggressor_corporation_id"
+        params.append(aid)
+        clauses.append(f"{col} = ${len(params)}")
+
+    if defender is not None:
+        kind, did = defender
+        dcol = "defender_alliance_id" if kind == "alliance" else "defender_corporation_id"
+        acol = "ally_alliance_ids" if kind == "alliance" else "ally_corporation_ids"
+        params.append(did)
+        dclause = f"{dcol} = ${len(params)}"
+        params.append([did])
+        aclause = f"{acol} @> ${len(params)}::int[]"
+        clauses.append(f"({dclause} OR {aclause})")
+
+    params.append(limit)
+    sql = (
+        f"SELECT {_WAR_COLUMNS} FROM wars WHERE {' AND '.join(clauses)} "
+        f"ORDER BY declared DESC NULLS LAST LIMIT ${len(params)}"
+    )
+    return await db.fetch(sql, *params)
+
+
 def build_war_processed(war_row, corp_info, alliance_info) -> WarProcessed:
     """Build WarProcessed from a resolved war row + already-resolved corp/alliance dicts."""
     return WarProcessed(

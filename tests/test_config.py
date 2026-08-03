@@ -371,3 +371,10 @@ def test_autocomplete_config_defaults():
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.limits.autocomplete_min_length == 3
     assert cfg.cache.autocomplete_ttl == 60
+
+
+def test_war_config_defaults():
+    from app.config import load_config
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.limits.max_war_results == 500
+    assert cfg.cache.war_search_ttl == 60

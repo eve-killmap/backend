@@ -79,6 +79,21 @@ class WarProcessed(BaseModel):
     started: int | None
 
 
+class WarSummary(BaseModel):
+    war_id: int
+    declared: int | None
+    started: int | None
+    finished: int | None
+    retracted: int | None
+    mutual: bool
+    aggressor_corporation_id: int | None
+    aggressor_alliance_id: int | None
+    defender_corporation_id: int | None
+    defender_alliance_id: int | None
+    ally_corporation_ids: list[int]
+    ally_alliance_ids: list[int]
+
+
 class ProcessedKillDetailResponse(BaseModel):
     victim: VictimProcessed
     final_blow: AttackerProcessed

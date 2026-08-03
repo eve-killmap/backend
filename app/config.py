@@ -74,6 +74,7 @@ class CacheConfig:
     filtered_map_ttl: int
     filtered_system_ttl: int
     autocomplete_ttl: int
+    war_search_ttl: int
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,7 @@ class LimitsConfig:
     max_filter_conditions: int
     max_filter_ids_per_condition: int
     autocomplete_min_length: int
+    max_war_results: int
 
 
 @dataclass(frozen=True)
@@ -318,6 +320,9 @@ def load_config(
         autocomplete_ttl=_as_int(
             cache_cfg.get("autocomplete_ttl", 60), "cache.autocomplete_ttl", minimum=1
         ),
+        war_search_ttl=_as_int(
+            cache_cfg.get("war_search_ttl", 60), "cache.war_search_ttl", minimum=1
+        ),
     )
 
     cache_redis_keepalive = cache_redis_cfg.get("socket_keepalive", True)
@@ -398,6 +403,10 @@ def load_config(
         autocomplete_min_length=_as_int(
             limits_cfg.get("autocomplete_min_length", 3),
             "limits.autocomplete_min_length", minimum=1,
+        ),
+        max_war_results=_as_int(
+            limits_cfg.get("max_war_results", 500),
+            "limits.max_war_results", minimum=1,
         ),
     )
 

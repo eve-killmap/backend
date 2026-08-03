@@ -148,3 +148,6 @@ app.include_router(ws_router.router)
 
 from app.routers import autocomplete as autocomplete_router
 app.include_router(autocomplete_router.router)
+
+from app.routers import wars as wars_router
+app.include_router(wars_router.router)
