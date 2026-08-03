@@ -54,6 +54,15 @@ _GLOBAL_FIELDS = frozenset(
         "fb_corporation_id",
         "fb_corporation_name",
         "fb_alliance_name",
+        "v_alliance_id",
+        "v_faction_id",
+        "war_id",
+        "a_character_ids",
+        "a_corporation_ids",
+        "a_alliance_ids",
+        "a_faction_ids",
+        "a_ship_type_ids",
+        "a_weapon_type_ids",
     }
 )
 
@@ -149,6 +158,33 @@ async def _enrich_kill(kill: dict) -> dict:
     }
 
 
+def _facet_ids(kill: dict) -> dict:
+    """Raw facet ids for client-side live filtering, straight from the parsed
+    killmail (no DB). Attacker ids are deduped per attribute, nulls stripped."""
+    attackers = kill.get("attackers") or []
+
+    def _distinct(field: str) -> list[int]:
+        seen: set[int] = set()
+        out: list[int] = []
+        for a in attackers:
+            v = a.get(field)
+            if v is not None and v not in seen:
+                seen.add(v)
+                out.append(v)
+        return out
+
+    return {
+        "v_faction_id": kill.get("victim_faction_id"),
+        "war_id": kill.get("war_id"),
+        "a_character_ids": _distinct("character_id"),
+        "a_corporation_ids": _distinct("corporation_id"),
+        "a_alliance_ids": _distinct("alliance_id"),
+        "a_faction_ids": _distinct("faction_id"),
+        "a_ship_type_ids": _distinct("ship_type_id"),
+        "a_weapon_type_ids": _distinct("weapon_type_id"),
+    }
+
+
 async def _parse_kill(kill: dict) -> dict:
     payload = {
         "killmail_id": kill["killmail_id"],
@@ -160,6 +196,7 @@ async def _parse_kill(kill: dict) -> dict:
         "v_ship_type_id": kill["victim_ship_type_id"],
     }
     payload.update(await _enrich_kill(kill))
+    payload.update(_facet_ids(kill))
     return payload
 
 
