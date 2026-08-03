@@ -1,6 +1,6 @@
 from app.database import db
 from app.filters import Filter, build_map_sql, build_system_sql
-from app.models import SystemKillsResponse
+from app.models import SystemKillsResponse, SystemKillIdsResponse
 
 
 async def fetch_filtered_map(f: Filter) -> SystemKillsResponse:
@@ -19,3 +19,12 @@ async def fetch_filtered_map(f: Filter) -> SystemKillsResponse:
         system_ids=system_ids, all=all_c, day=day, week=week,
         month=month, six_months=six, year=year,
     )
+
+
+async def fetch_filtered_system_kill_ids(
+    solar_system_id: int, f: Filter
+) -> SystemKillIdsResponse:
+    sql, params = build_system_sql(f, solar_system_id)
+    rows = await db.fetch(sql, *params)
+    ids = [r["killmail_id"] for r in rows]
+    return SystemKillIdsResponse(count=len(ids), killmail_ids=ids)

@@ -118,6 +118,11 @@ class SystemKillsResponse(BaseModel):
     year: list[int]
 
 
+class SystemKillIdsResponse(BaseModel):
+    count: int
+    killmail_ids: list[int]
+
+
 class FarthestKillResponse(BaseModel):
     farthest_kill: int
 

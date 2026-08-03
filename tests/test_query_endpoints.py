@@ -176,3 +176,25 @@ def test_system_kills_unfiltered_still_uses_rankings_ttl(monkeypatch):
     flt = parse_filter([], max_conditions=8, max_ids=50)  # empty
     resp = asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
     assert resp.headers["Cache-Control"] == f"public, max-age={stats.config.cache.rankings_ttl}"
+
+
+def test_system_kills_filtered_endpoint(monkeypatch):
+    from app.models import SystemKillIdsResponse
+
+    async def fake_fetch(system_id, flt):
+        return SystemKillIdsResponse(count=1, killmail_ids=[777])
+    monkeypatch.setattr(systems, "fetch_filtered_system_kill_ids", fake_fetch)
+    flt = parse_filter(["ship:victim:670"], max_conditions=8, max_ids=50)
+    resp = asyncio.run(systems.get_system_kills_filtered(30000142, flt=flt))
+    assert resp.status_code == 200
+    assert b'"killmail_ids":[777]' in resp.body
+    assert resp.headers["Cache-Control"] == f"public, max-age={systems.config.cache.filtered_system_ttl}"
+
+
+def test_get_filter_dependency_rejects_malformed_filter():
+    import pytest
+    from fastapi import HTTPException
+    from app.routers.dependencies import get_filter
+    with pytest.raises(HTTPException) as e:
+        get_filter(f=["bogus:victim:1"])   # unknown attribute -> FilterError -> 400
+    assert e.value.status_code == 400

@@ -31,3 +31,14 @@ def test_fetch_filtered_map_builds_columns(monkeypatch):
     assert result.day == [1, 0]
     assert result.six_months == [5, 2]
     assert "kill_facets" in fake.query
+
+
+def test_fetch_filtered_system_kill_ids(monkeypatch):
+    fake = _FakeDbFetch([{"killmail_id": 111}, {"killmail_id": 222}])
+    monkeypatch.setattr(fq, "db", fake)
+    f = parse_filter(["character:involved:12345"], max_conditions=8, max_ids=50)
+    result = asyncio.run(fq.fetch_filtered_system_kill_ids(30000142, f))
+    assert result.count == 2
+    assert result.killmail_ids == [111, 222]
+    assert "DISTINCT" in fake.query
+    assert 30000142 in fake.args

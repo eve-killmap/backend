@@ -358,3 +358,9 @@ def test_filtered_map_ttl_default():
     from app.config import load_config
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.cache.filtered_map_ttl == 1800
+
+
+def test_filtered_system_ttl_default():
+    from app.config import load_config
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.cache.filtered_system_ttl == 15

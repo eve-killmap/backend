@@ -3,7 +3,7 @@ import logging
 import time
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Query, Header, HTTPException
+from fastapi import APIRouter, Query, Header, HTTPException, Depends
 from fastapi.responses import Response
 
 from app.config import config
@@ -20,6 +20,9 @@ from app.esi import esi_client
 from app import prometheus_metrics
 from app.queries import fetch_raw_kills, fetch_farthest_kill, normalize_farthest_kill
 from app.models import SovResponse, GroupInfo, FarthestKillResponse
+from app.routers.dependencies import get_filter
+from app.filters import Filter
+from app.facet_queries import fetch_filtered_system_kill_ids
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -88,6 +91,24 @@ async def get_system_kills(
     prometheus_metrics.kills_binary_response_bytes.observe(len(body))
     return binary_cache_response(
         body, gzipped=gzipped, max_age=config.cache.binary_ttl, fresh_to=fresh_to
+    )
+
+
+@router.get("/systems/{solar_system_id}/kills/filtered", response_model=None)
+async def get_system_kills_filtered(
+    solar_system_id: int,
+    flt: Filter = Depends(get_filter),
+):
+    """Get the full set of killmail ids in a solar system matching the filter.
+
+    Served live (no origin cache) with a short client-side TTL; the result is
+    the complete matching id mask, not paginated.
+    """
+    result = await fetch_filtered_system_kill_ids(solar_system_id, flt)
+    return Response(
+        content=result.model_dump_json(),
+        media_type="application/json",
+        headers={"Cache-Control": f"public, max-age={config.cache.filtered_system_ttl}"},
     )
 
 
