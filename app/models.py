@@ -153,3 +153,16 @@ class HealthDetailResponse(BaseModel):
     database: dict
     domain: dict
     redis: dict
+
+
+class EntityCandidate(BaseModel):
+    id: int
+    name: str
+    ticker: str | None = None
+    image_url: str
+
+
+class TypeCandidate(BaseModel):
+    id: int
+    name: str
+    image_url: str

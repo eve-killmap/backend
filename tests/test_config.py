@@ -364,3 +364,10 @@ def test_filtered_system_ttl_default():
     from app.config import load_config
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.cache.filtered_system_ttl == 15
+
+
+def test_autocomplete_config_defaults():
+    from app.config import load_config
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.limits.autocomplete_min_length == 3
+    assert cfg.cache.autocomplete_ttl == 60
