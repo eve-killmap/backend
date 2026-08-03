@@ -71,6 +71,7 @@ class CacheConfig:
     kill_detail_ttl: int
     kill_detail_processed_ttl: int
     system_latest_ttl: int
+    filtered_map_ttl: int
 
 
 @dataclass(frozen=True)
@@ -304,6 +305,9 @@ def load_config(
         ),
         system_latest_ttl=_as_int(
             cache_cfg.get("system_latest_ttl", 10), "cache.system_latest_ttl", minimum=1
+        ),
+        filtered_map_ttl=_as_int(
+            cache_cfg.get("filtered_map_ttl", 1800), "cache.filtered_map_ttl", minimum=1
         ),
     )
 

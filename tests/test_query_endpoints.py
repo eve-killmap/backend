@@ -4,6 +4,7 @@ import app.routers.stats as stats
 import app.routers.systems as systems
 from app.config import config
 from app.cache import QueryCache
+from app.filters import parse_filter
 
 
 class _FakeRedisRaising:
@@ -109,7 +110,8 @@ def test_system_kills_serves_from_cache_hit(monkeypatch):
         )
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
-    resp = asyncio.run(stats.get_system_kills_stats(if_none_match=None))
+    flt = parse_filter([], max_conditions=8, max_ids=50)  # empty -> unfiltered path
+    resp = asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
     assert resp.status_code == 200
     assert b'"system_ids"' in resp.body
     assert resp.headers["ETag"] == '"sk"'
@@ -142,11 +144,35 @@ def test_system_kills_single_flight_builds_once(monkeypatch):
     monkeypatch.setattr(stats.query_cache, "set", fake_set)
     monkeypatch.setattr(stats, "fetch_system_kills", fake_fetch)
 
+    flt = parse_filter([], max_conditions=8, max_ids=50)  # empty -> unfiltered path
+
     async def go():
         return await asyncio.gather(
-            *[stats.get_system_kills_stats(if_none_match=None) for _ in range(6)]
+            *[stats.get_system_kills_stats(flt=flt, if_none_match=None) for _ in range(6)]
         )
 
     resps = asyncio.run(go())
     assert len(calls) == 1
     assert all(r.status_code == 200 for r in resps)
+
+
+def test_system_kills_filtered_cache_hit(monkeypatch):
+    async def fake_get(prefix, params):
+        assert prefix == "system_kills_filtered"
+        return '"fk"', False, b'{"system_ids":[1],"all":[2],"day":[0],"week":[0],"month":[0],"six_months":[0],"year":[0]}'
+    monkeypatch.setattr(stats.query_cache, "get", fake_get)
+    flt = parse_filter(["alliance:attacker:99005338"], max_conditions=8, max_ids=50)
+    resp = asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
+    assert resp.status_code == 200
+    assert resp.headers["ETag"] == '"fk"'
+    assert resp.headers["Cache-Control"] == f"public, max-age={stats.config.cache.filtered_map_ttl}"
+
+
+def test_system_kills_unfiltered_still_uses_rankings_ttl(monkeypatch):
+    async def fake_get(prefix, params):
+        assert prefix == "system_kills"
+        return '"sk"', False, b'{"system_ids":[],"all":[],"day":[],"week":[],"month":[],"six_months":[],"year":[]}'
+    monkeypatch.setattr(stats.query_cache, "get", fake_get)
+    flt = parse_filter([], max_conditions=8, max_ids=50)  # empty
+    resp = asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
+    assert resp.headers["Cache-Control"] == f"public, max-age={stats.config.cache.rankings_ttl}"

@@ -352,3 +352,9 @@ def test_filter_limits_have_defaults():
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.limits.max_filter_conditions == 8
     assert cfg.limits.max_filter_ids_per_condition == 50
+
+
+def test_filtered_map_ttl_default():
+    from app.config import load_config
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.cache.filtered_map_ttl == 1800
