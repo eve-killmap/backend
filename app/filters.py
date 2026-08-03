@@ -148,6 +148,8 @@ def _exists(cond: Condition, params: list) -> str:
 
 
 def _split_driver(f: Filter) -> tuple[Condition, list[Condition]]:
+    if not f.conditions:
+        raise FilterError("cannot build SQL for an empty filter")
     driver_i = min(
         range(len(f.conditions)),
         key=lambda i: DRIVER_RANK[f.conditions[i].facet_kind],

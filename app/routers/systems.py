@@ -104,6 +104,8 @@ async def get_system_kills_filtered(
     Served live (no origin cache) with a short client-side TTL; the result is
     the complete matching id mask, not paginated.
     """
+    if flt.is_empty:
+        raise HTTPException(status_code=400, detail="at least one filter condition (f=) is required")
     result = await fetch_filtered_system_kill_ids(solar_system_id, flt)
     return Response(
         content=result.model_dump_json(),

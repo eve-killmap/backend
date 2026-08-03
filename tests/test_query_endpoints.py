@@ -198,3 +198,12 @@ def test_get_filter_dependency_rejects_malformed_filter():
     with pytest.raises(HTTPException) as e:
         get_filter(f=["bogus:victim:1"])   # unknown attribute -> FilterError -> 400
     assert e.value.status_code == 400
+
+
+def test_system_kills_filtered_rejects_empty_filter():
+    import pytest
+    from fastapi import HTTPException
+    empty = parse_filter([], max_conditions=8, max_ids=50)
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(systems.get_system_kills_filtered(30000142, flt=empty))
+    assert e.value.status_code == 400

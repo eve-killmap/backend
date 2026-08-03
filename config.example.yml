@@ -47,6 +47,10 @@ cache:
   kill_detail_ttl: 604800   # per-killmail raw detail (immutable; 7 days)
   kill_detail_processed_ttl: 3600   # processed kill detail
   system_latest_ttl: 10     # per-system MAX(inserted_time) short-circuit cache
+  filtered_map_ttl: 1800    # /stats/system-kills response when f= filters are applied
+  filtered_system_ttl: 15   # /systems/{id}/kills/filtered response
+  autocomplete_ttl: 60      # entity/ship/weapon autocomplete responses
+  war_search_ttl: 60        # war search responses
 
 cache_redis:
   # Connection pool for the response/ESI cache Redis (REDIS_CACHE_URL). A blocking
@@ -79,6 +83,10 @@ limits:
   max_killmail_ids: 100      # /kills/details/raw ids per request
   max_name_ids: 100          # POST /universe/names ids per request
   max_ws_connections: 1000   # per-process WebSocket connection cap
+  max_filter_conditions: 8           # max f= conditions per faceted-filter request
+  max_filter_ids_per_condition: 50   # max ids within a single f= condition
+  autocomplete_min_length: 3         # minimum query length for autocomplete endpoints
+  max_war_results: 500               # max results returned by war search
 
 metrics:
   # Expose a Prometheus scrape endpoint (/metrics) on host:port. Off by default
