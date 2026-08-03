@@ -130,8 +130,14 @@ def test_universe_names_uses_types(monkeypatch):
         return {587: "Rifter"}
 
     monkeypatch.setattr(universe, "get_type_names", fake_types)
+    # 587 classifies as CATEGORY_TYPE, so the entity buckets stay empty and
+    # entities.fetch_entity_names short-circuits without touching the DB.
     out = asyncio.run(universe.resolve_universe_names([587]))
-    assert out == {587: "Rifter"}
+    assert set(out) == {587}
+    assert out[587].category == "type"
+    assert out[587].name == "Rifter"
+    assert out[587].ticker is None
+    assert out[587].image_url.endswith("/types/587/icon?size=32")
 
 
 def test_universe_names_rejects_over_cap():

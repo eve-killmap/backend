@@ -181,3 +181,10 @@ class TypeCandidate(BaseModel):
     id: int
     name: str
     image_url: str
+
+
+class NameResolution(BaseModel):
+    category: str
+    name: str
+    ticker: str | None = None
+    image_url: str
