@@ -180,6 +180,25 @@ kills_binary_response_bytes = Histogram(
 )
 
 
+# Faceted filtering
+
+facet_query_seconds = Histogram(
+    "eve_killmap_facet_query_seconds",
+    "Latency of a kill_facets filtered query, by query type.",
+    ["query"],  # map|system
+)
+autocomplete_requests = Counter(
+    "eve_killmap_autocomplete_requests",
+    "Autocomplete requests, by picker kind and outcome.",
+    ["kind", "outcome"],  # kind: character|corporation|alliance|faction|type  outcome: served|short_circuit
+)
+filter_conditions = Histogram(
+    "eve_killmap_filter_conditions",
+    "Number of conditions in a filtered (non-empty) request.",
+    buckets=(1, 2, 3, 4, 5, 6, 7, 8),
+)
+
+
 _started = False
 
 

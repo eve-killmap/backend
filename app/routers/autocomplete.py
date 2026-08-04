@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query, Response
 from app.config import config
 from app.autocomplete import autocomplete_entities, autocomplete_types
 from app.models import EntityCandidate, TypeCandidate
+from app import prometheus_metrics as pm
 
 router = APIRouter()
 
@@ -25,8 +26,11 @@ async def autocomplete_entities_endpoint(
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ):
     response.headers["Cache-Control"] = f"public, max-age={config.cache.autocomplete_ttl}"
+    kind_label = getattr(kind, "value", kind)
     if len(q.strip()) < config.limits.autocomplete_min_length:
+        pm.autocomplete_requests.labels(kind=kind_label, outcome="short_circuit").inc()
         return []
+    pm.autocomplete_requests.labels(kind=kind_label, outcome="served").inc()
     # EntityKind subclasses str, so plain strings (as used by tests that call
     # this function directly, bypassing FastAPI's enum coercion) work here too.
     return await autocomplete_entities(kind, q.strip(), limit)
@@ -40,5 +44,7 @@ async def autocomplete_types_endpoint(
 ):
     response.headers["Cache-Control"] = f"public, max-age={config.cache.autocomplete_ttl}"
     if len(q.strip()) < config.limits.autocomplete_min_length:
+        pm.autocomplete_requests.labels(kind="type", outcome="short_circuit").inc()
         return []
+    pm.autocomplete_requests.labels(kind="type", outcome="served").inc()
     return await autocomplete_types(q.strip(), limit)

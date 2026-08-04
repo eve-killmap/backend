@@ -94,3 +94,33 @@ def test_build_war_processed():
     assert wp.defender.corporation == "CorpB" and wp.defender.alliance is None
     assert wp.defender.ships_killed == 0   # NULL -> 0
     assert wp.mutual is True
+
+
+class _FakeDb:
+    async def fetch(self, sql, ids):
+        # return a row only for the corporations query (has ticker), empty otherwise
+        if "corporation_id" in sql:
+            return [{"id": 98000001, "name": "Corp", "ticker": "TCK"}]
+        return []
+
+
+def _lookup(kind, result):
+    return REGISTRY.get_sample_value(
+        "eve_killmap_entity_lookups_total", {"kind": kind, "result": result}
+    ) or 0.0
+
+
+def test_emit_metrics_false_suppresses_entity_lookups(monkeypatch):
+    monkeypatch.setattr(entities, "db", _FakeDb())
+    before_missing = _lookup("character", "missing")
+    before_found = _lookup("corporation", "found")
+    asyncio.run(entities.fetch_entity_names({1}, {98000001}, {2}, set(), emit_metrics=False))
+    assert _lookup("character", "missing") - before_missing == 0
+    assert _lookup("corporation", "found") - before_found == 0
+
+
+def test_emit_metrics_true_still_counts(monkeypatch):
+    monkeypatch.setattr(entities, "db", _FakeDb())
+    before = _lookup("corporation", "found")
+    asyncio.run(entities.fetch_entity_names(set(), {98000001}, set(), set(), emit_metrics=True))
+    assert _lookup("corporation", "found") - before == 1

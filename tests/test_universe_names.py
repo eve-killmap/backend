@@ -9,7 +9,7 @@ def test_universe_names_routes_by_range_and_probes_ambiguous(monkeypatch):
         captured["types"] = set(ids)
         return {587: "Rifter"}
 
-    async def fake_entity_names(char_ids, corp_ids, alliance_ids, faction_ids):
+    async def fake_entity_names(char_ids, corp_ids, alliance_ids, faction_ids, **kwargs):
         captured["chars"] = set(char_ids)
         captured["corps"] = set(corp_ids)
         captured["alliances"] = set(alliance_ids)

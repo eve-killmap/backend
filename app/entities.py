@@ -31,12 +31,16 @@ async def fetch_entity_names(
     corp_ids: set[int],
     alliance_ids: set[int],
     faction_ids: set[int],
+    *,
+    emit_metrics: bool = True,
 ) -> tuple[dict[int, str], dict[int, tuple[str, str]], dict[int, tuple[str, str]], dict[int, str]]:
     """Resolve entity ids to names/tickers from the DB reference tables.
 
     Returns (character_names, corp_info{id:(name,ticker)}, alliance_info{id:(name,ticker)},
     faction_names). Rows with a NULL name are omitted (caller's .get(...) yields the
-    existing "Unknown"/None). Emits entity_lookups per requested id (found|missing).
+    existing "Unknown"/None). Emits entity_lookups per requested id (found|missing)
+    unless emit_metrics=False (e.g. the ambiguous-id probe on /universe/names, which
+    would otherwise skew the metric with intentional misses).
     """
     char_rows, corp_rows, alliance_rows, faction_rows = await asyncio.gather(
         _fetch(_CHAR_SQL, character_ids),
@@ -50,10 +54,11 @@ async def fetch_entity_names(
     alliance_info = {r["id"]: (r["name"], r["ticker"]) for r in alliance_rows if r["name"] is not None}
     faction_names = {r["id"]: r["name"] for r in faction_rows if r["name"] is not None}
 
-    _count("character", character_ids, character_names)
-    _count("corporation", corp_ids, corp_info)
-    _count("alliance", alliance_ids, alliance_info)
-    _count("faction", faction_ids, faction_names)
+    if emit_metrics:
+        _count("character", character_ids, character_names)
+        _count("corporation", corp_ids, corp_info)
+        _count("alliance", alliance_ids, alliance_info)
+        _count("faction", faction_ids, faction_names)
 
     return character_names, corp_info, alliance_info, faction_names
 

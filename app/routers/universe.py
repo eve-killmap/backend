@@ -53,7 +53,7 @@ async def resolve_universe_names(
 
     type_names, (char_names, corp_info, alliance_info, faction_names) = await asyncio.gather(
         get_type_names(type_ids),
-        entities.fetch_entity_names(char_ids, corp_ids, alliance_ids, faction_ids),
+        entities.fetch_entity_names(char_ids, corp_ids, alliance_ids, faction_ids, emit_metrics=False),
     )
 
     out: dict[int, NameResolution] = {}
