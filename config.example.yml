@@ -51,6 +51,7 @@ cache:
   filtered_system_ttl: 15   # /systems/{id}/kills/filtered response
   autocomplete_ttl: 60      # entity/ship/weapon autocomplete responses
   war_search_ttl: 60        # war search responses
+  war_details_ttl: 21600    # /wars/details per-id cache (6h)
 
 cache_redis:
   # Connection pool for the response/ESI cache Redis (REDIS_CACHE_URL). A blocking
@@ -87,6 +88,7 @@ limits:
   max_filter_ids_per_condition: 50   # max ids within a single f= condition
   autocomplete_min_length: 3         # minimum query length for autocomplete endpoints
   max_war_results: 500               # max results returned by war search
+  max_war_ids: 200                   # max war ids per /wars/details request
 
 metrics:
   # Expose a Prometheus scrape endpoint (/metrics) on host:port. Off by default

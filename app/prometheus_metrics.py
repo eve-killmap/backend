@@ -190,7 +190,7 @@ facet_query_seconds = Histogram(
 autocomplete_requests = Counter(
     "eve_killmap_autocomplete_requests",
     "Autocomplete requests, by picker kind and outcome.",
-    ["kind", "outcome"],  # kind: character|corporation|alliance|faction|type  outcome: served|short_circuit
+    ["kind", "outcome"],  # kind: character|corporation|alliance|faction|type|weapon  outcome: served|short_circuit
 )
 filter_conditions = Histogram(
     "eve_killmap_filter_conditions",

@@ -378,3 +378,5 @@ def test_war_config_defaults():
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.limits.max_war_results == 500
     assert cfg.cache.war_search_ttl == 60
+    assert cfg.cache.war_details_ttl == 21600
+    assert cfg.limits.max_war_ids == 200

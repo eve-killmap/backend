@@ -1,10 +1,11 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Body, HTTPException, Query, Response
 
 from app.config import config
-from app.entities import search_wars
+from app.entities import get_war_details, search_wars, war_summary_from_row
 from app.models import WarSummary
+from app.security import validate_id_list
 
 router = APIRouter()
 
@@ -24,10 +25,6 @@ def _parse_side(value: str | None) -> tuple[str, int] | None:
     return kind, entity_id
 
 
-def _epoch(value) -> int | None:
-    return int(value.timestamp()) if value is not None else None
-
-
 @router.get("/wars/search", response_model=list[WarSummary])
 async def war_search(
     response: Response,
@@ -40,20 +37,12 @@ async def war_search(
         raise HTTPException(status_code=400, detail="at least one of aggressor/defender required")
     response.headers["Cache-Control"] = f"public, max-age={config.cache.war_search_ttl}"
     rows = await search_wars(agg, dfn, config.limits.max_war_results)
-    return [
-        WarSummary(
-            war_id=r["war_id"],
-            declared=_epoch(r["declared"]),
-            started=_epoch(r["started"]),
-            finished=_epoch(r["finished"]),
-            retracted=_epoch(r["retracted"]),
-            mutual=bool(r["mutual"]),
-            aggressor_corporation_id=r["aggressor_corporation_id"],
-            aggressor_alliance_id=r["aggressor_alliance_id"],
-            defender_corporation_id=r["defender_corporation_id"],
-            defender_alliance_id=r["defender_alliance_id"],
-            ally_corporation_ids=list(r["ally_corporation_ids"] or []),
-            ally_alliance_ids=list(r["ally_alliance_ids"] or []),
-        )
-        for r in rows
-    ]
+    return [war_summary_from_row(r) for r in rows]
+
+
+@router.post("/wars/details", response_model=list[WarSummary])
+async def war_details(ids: Annotated[list[int], Body()]):
+    error = validate_id_list(ids, config.limits.max_war_ids)
+    if error is not None:
+        raise HTTPException(status_code=400, detail=error)
+    return await get_war_details(ids)

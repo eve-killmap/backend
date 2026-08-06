@@ -106,3 +106,27 @@ def test_types_endpoint_metric(monkeypatch):
     asyncio.run(acr.autocomplete_types_endpoint(q="ne", limit=20, response=Response()))
     assert _ac("type", "served") - s0 == 1
     assert _ac("type", "short_circuit") - x0 == 1
+
+
+def test_autocomplete_weapons_uses_mv(monkeypatch):
+    fake = _FakeDb([{"id": 2929, "name": "Large Energy Neutralizer II"}])
+    monkeypatch.setattr(ac, "db", fake)
+    out = asyncio.run(ac.autocomplete_weapons("neut", 20))
+    assert out[0].id == 2929
+    assert out[0].image_url.endswith("/types/2929/icon?size=32")
+    assert "mv_weapon_search" in fake.query
+    assert "published" not in fake.query
+
+
+def test_weapons_endpoint_metric(monkeypatch):
+    from app.models import TypeCandidate
+    from fastapi import Response
+
+    async def fake(q, limit):
+        return [TypeCandidate(id=2929, name="Neut", image_url="u")]
+    monkeypatch.setattr(acr, "autocomplete_weapons", fake)
+    s0, x0 = _ac("weapon", "served"), _ac("weapon", "short_circuit")
+    asyncio.run(acr.autocomplete_weapons_endpoint(q="neut", limit=20, response=Response()))
+    asyncio.run(acr.autocomplete_weapons_endpoint(q="ne", limit=20, response=Response()))
+    assert _ac("weapon", "served") - s0 == 1
+    assert _ac("weapon", "short_circuit") - x0 == 1

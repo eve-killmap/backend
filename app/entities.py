@@ -3,10 +3,20 @@ from __future__ import annotations
 import asyncio
 
 import asyncpg
+import redis.asyncio as aioredis
+from redis.exceptions import RedisError
 
+from app.config import config
 from app.database import db
 from app import prometheus_metrics as pm
-from app.models import WarParticipant, WarProcessed
+from app.models import WarParticipant, WarProcessed, WarSummary
+
+_redis: aioredis.Redis | None = None
+
+
+def set_redis(redis_client: aioredis.Redis) -> None:
+    global _redis
+    _redis = redis_client
 
 _CHAR_SQL = "SELECT character_id AS id, name FROM characters WHERE character_id = ANY($1::bigint[])"
 _CORP_SQL = "SELECT corporation_id AS id, name, ticker FROM corporations WHERE corporation_id = ANY($1::int[])"
@@ -134,6 +144,89 @@ async def search_wars(
         f"ORDER BY declared DESC NULLS LAST LIMIT ${len(params)}"
     )
     return await db.fetch(sql, *params)
+
+
+def war_summary_from_row(row) -> WarSummary:
+    """Map a wars row (carrying the _WAR_COLUMNS fields) to a WarSummary.
+    Shared by /wars/search and /wars/details so both emit an identical shape."""
+    return WarSummary(
+        war_id=row["war_id"],
+        declared=_epoch(row["declared"]),
+        started=_epoch(row["started"]),
+        finished=_epoch(row["finished"]),
+        retracted=_epoch(row["retracted"]),
+        mutual=bool(row["mutual"]),
+        aggressor_corporation_id=row["aggressor_corporation_id"],
+        aggressor_alliance_id=row["aggressor_alliance_id"],
+        defender_corporation_id=row["defender_corporation_id"],
+        defender_alliance_id=row["defender_alliance_id"],
+        ally_corporation_ids=list(row["ally_corporation_ids"] or []),
+        ally_alliance_ids=list(row["ally_alliance_ids"] or []),
+    )
+
+
+async def _fetch_war_rows(ids: list[int]) -> list[asyncpg.Record]:
+    if not ids:
+        return []
+    # resolved_at is fetched (beyond _WAR_COLUMNS) only to decide cacheability.
+    return await db.fetch(
+        f"SELECT {_WAR_COLUMNS}, resolved_at FROM wars WHERE war_id = ANY($1)",
+        ids,
+    )
+
+
+async def get_war_details(war_ids: list[int]) -> list[WarSummary]:
+    """Resolve a batch of war ids to WarSummary rows (same shape as search_wars).
+
+    Per-war-id Redis-cached with ``war_details_ttl``. Absent ids are omitted.
+    Unenriched stubs (resolved_at IS NULL) are returned but NOT cached, so a war
+    mid-enrichment picks up its participants on the next request instead of
+    serving a bare label for the whole TTL. Degrades to a live DB read on any
+    Redis error or when no cache is configured."""
+    if not war_ids:
+        return []
+    ids = list(dict.fromkeys(war_ids))  # dedupe, preserve request order
+
+    if _redis is None:
+        rows = await _fetch_war_rows(ids)
+        by_id = {r["war_id"]: war_summary_from_row(r) for r in rows}
+        return [by_id[i] for i in ids if i in by_id]
+
+    try:
+        cached = await _redis.mget(*[f"war:details:{i}" for i in ids])
+    except RedisError:
+        pm.errors.labels(component="cache").inc()
+        cached = [None] * len(ids)
+
+    result: dict[int, WarSummary] = {}
+    misses: list[int] = []
+    for war_id, raw in zip(ids, cached):
+        if raw is not None:
+            result[war_id] = WarSummary.model_validate_json(raw)
+        else:
+            misses.append(war_id)
+
+    if misses:
+        rows = await _fetch_war_rows(misses)
+        pipe = _redis.pipeline()
+        to_cache = 0
+        for r in rows:
+            summary = war_summary_from_row(r)
+            result[r["war_id"]] = summary
+            if r["resolved_at"] is not None:
+                pipe.set(
+                    f"war:details:{r['war_id']}",
+                    summary.model_dump_json(),
+                    ex=config.cache.war_details_ttl,
+                )
+                to_cache += 1
+        if to_cache:
+            try:
+                await pipe.execute()
+            except RedisError:
+                pm.errors.labels(component="cache").inc()
+
+    return [result[i] for i in ids if i in result]
 
 
 def build_war_processed(war_row, corp_info, alliance_info) -> WarProcessed:

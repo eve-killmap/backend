@@ -17,6 +17,7 @@ from app.redis_client import broadcaster
 from app import prometheus_metrics
 import app.queries as queries
 import app.invalidation as invalidation
+from app import entities
 
 
 def _build_cache_client(decode_responses: bool) -> aioredis.Redis:
@@ -42,6 +43,7 @@ async def lifespan(_app: FastAPI):
         cache_redis_bytes = _build_cache_client(decode_responses=False)
         await esi_client.startup(cache_redis)
         queries.set_redis(cache_redis)
+        entities.set_redis(cache_redis)
         query_cache.set_redis(cache_redis_bytes)
         kills_binary_cache.set_redis(cache_redis_bytes)
         health.set_redis(cache_redis)
