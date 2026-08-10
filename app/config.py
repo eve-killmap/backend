@@ -112,6 +112,7 @@ class LimitsConfig:
     autocomplete_min_length: int
     max_war_results: int
     max_war_ids: int
+    encode_offload_min_rows: int
 
 
 @dataclass(frozen=True)
@@ -416,6 +417,10 @@ def load_config(
         max_war_ids=_as_int(
             limits_cfg.get("max_war_ids", 200),
             "limits.max_war_ids", minimum=1,
+        ),
+        encode_offload_min_rows=_as_int(
+            limits_cfg.get("encode_offload_min_rows", 2000),
+            "limits.encode_offload_min_rows", minimum=1,
         ),
     )
 

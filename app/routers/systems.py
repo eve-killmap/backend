@@ -28,6 +28,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _encode_maybe_offload(result, threshold: int) -> bytes:
+    """Encode the columnar kills payload, offloading to a worker thread when the
+    row count is large enough that a full in-loop encode would stall the event
+    loop. Below the threshold the thread hop isn't worth it, so encode inline.
+    numpy releases the GIL, so the offloaded encode genuinely progresses while
+    the loop serves other requests."""
+    args = (
+        result["killmail_ids"],
+        result["killmail_times"],
+        [int(v) for v in result["x"]],
+        [int(v) for v in result["y"]],
+        [int(v) for v in result["z"]],
+        result["ship_types"],
+    )
+    if len(result["killmail_ids"]) >= threshold:
+        return await asyncio.to_thread(encode_kills_binary, *args)
+    return encode_kills_binary(*args)
+
+
 @router.get("/systems/{solar_system_id}/kills", response_model=None)
 async def get_system_kills(
     solar_system_id: int,
@@ -52,13 +71,8 @@ async def get_system_kills(
             payload = encode_kills_binary([], [], [], [], [], [])
         else:
             result = await fetch_raw_kills(solar_system_id=solar_system_id, since=since)
-            payload = encode_kills_binary(
-                killmail_ids=result["killmail_ids"],
-                killmail_times=result["killmail_times"],
-                x=[int(v) for v in result["x"]],
-                y=[int(v) for v in result["y"]],
-                z=[int(v) for v in result["z"]],
-                ship_types=result["ship_types"],
+            payload = await _encode_maybe_offload(
+                result, config.limits.encode_offload_min_rows
             )
         prometheus_metrics.kills_binary_response_bytes.observe(len(payload))
         return Response(
@@ -78,13 +92,8 @@ async def get_system_kills(
                 latest = await get_system_latest(solar_system_id)
                 fresh_to = latest if latest is not None else int(time.time())
                 result = await fetch_raw_kills(solar_system_id=solar_system_id, since=None)
-                encoded = encode_kills_binary(
-                    killmail_ids=result["killmail_ids"],
-                    killmail_times=result["killmail_times"],
-                    x=[int(v) for v in result["x"]],
-                    y=[int(v) for v in result["y"]],
-                    z=[int(v) for v in result["z"]],
-                    ship_types=result["ship_types"],
+                encoded = await _encode_maybe_offload(
+                    result, config.limits.encode_offload_min_rows
                 )
                 res = await kills_binary_cache.set(cache_params, encoded, fresh_to)
     fresh_to, gzipped, body = res

@@ -380,3 +380,4 @@ def test_war_config_defaults():
     assert cfg.cache.war_search_ttl == 60
     assert cfg.cache.war_details_ttl == 21600
     assert cfg.limits.max_war_ids == 200
+    assert cfg.limits.encode_offload_min_rows == 2000

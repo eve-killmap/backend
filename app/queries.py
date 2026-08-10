@@ -150,6 +150,8 @@ async def fetch_raw_kills(
 
     where_clause = " AND ".join(conditions)
 
+    order_clause = "ORDER BY kills.killmail_time DESC" if since is None else ""
+
     query = f"""
         SELECT
             killmail_id,
@@ -160,7 +162,7 @@ async def fetch_raw_kills(
             victim_ship_type_id
         FROM kills
         WHERE {where_clause}
-        ORDER BY killmail_time DESC
+        {order_clause}
     """
 
     kill_rows = await db.fetch(query, *params)

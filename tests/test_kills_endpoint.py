@@ -2,6 +2,7 @@ import asyncio
 import time
 
 import app.routers.systems as systems
+from app.binary_encoder import encode_kills_binary
 
 
 def _columns(ids):
@@ -131,3 +132,37 @@ def test_full_path_empty_system_uses_wallclock(monkeypatch):
     resp = asyncio.run(systems.get_system_kills(30009006, since=None))
     after = int(time.time())
     assert before <= int(resp.headers["X-Kills-Fresh-To"]) <= after
+
+
+def _expected(result):
+    return encode_kills_binary(
+        result["killmail_ids"], result["killmail_times"],
+        [int(v) for v in result["x"]], [int(v) for v in result["y"]],
+        [int(v) for v in result["z"]], result["ship_types"],
+    )
+
+
+def test_encode_maybe_offload_uses_thread_for_large(monkeypatch):
+    calls = {"n": 0}
+
+    async def rec(fn, *a):
+        calls["n"] += 1
+        return fn(*a)
+    monkeypatch.setattr(systems.asyncio, "to_thread", rec)
+    result = _columns(list(range(2000)))
+    out = asyncio.run(systems._encode_maybe_offload(result, 2000))
+    assert calls["n"] == 1                 # offloaded to a thread
+    assert out == _expected(result)        # ...and byte-identical
+
+
+def test_encode_maybe_offload_inline_for_small(monkeypatch):
+    calls = {"n": 0}
+
+    async def rec(fn, *a):
+        calls["n"] += 1
+        return fn(*a)
+    monkeypatch.setattr(systems.asyncio, "to_thread", rec)
+    result = _columns([1, 2, 3])
+    out = asyncio.run(systems._encode_maybe_offload(result, 2000))
+    assert calls["n"] == 0                 # below threshold → inline, no thread hop
+    assert out == _expected(result)

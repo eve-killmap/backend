@@ -128,3 +128,21 @@ def test_fetch_system_kills_aligns_and_defaults(monkeypatch):
     assert "LEFT JOIN" in q.upper()
     assert "COALESCE" in q.upper()
     assert "ORDER BY" in q.upper()
+
+
+def test_fetch_raw_kills_full_orders_by_real_column(monkeypatch):
+    # No `since`: order by the table-qualified original column so the index is
+    # used (a bare "killmail_time" would bind to the EXTRACT alias).
+    fake = _FakeDbFetch([])
+    monkeypatch.setattr(queries, "db", fake)
+    asyncio.run(queries.fetch_raw_kills(30000142))
+    assert "ORDER BY kills.killmail_time DESC" in fake.query
+
+
+def test_fetch_raw_kills_since_is_unordered(monkeypatch):
+    # With `since`: no ordering on the DB side (client sorts the delta).
+    fake = _FakeDbFetch([])
+    monkeypatch.setattr(queries, "db", fake)
+    asyncio.run(queries.fetch_raw_kills(30000142, since=1700000000))
+    assert "ORDER BY" not in fake.query
+    assert "inserted_time > $2" in fake.query

@@ -89,6 +89,7 @@ limits:
   autocomplete_min_length: 3         # minimum query length for autocomplete endpoints
   max_war_results: 500               # max results returned by war search
   max_war_ids: 200                   # max war ids per /wars/details request
+  encode_offload_min_rows: 2000      # offload the binary kills encode to a thread at/above this row count
 
 metrics:
   # Expose a Prometheus scrape endpoint (/metrics) on host:port. Off by default

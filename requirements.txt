@@ -10,3 +10,4 @@ PyYAML==6.0.3
 python-dotenv==1.2.2
 prometheus-client==0.25.0
 prometheus-fastapi-instrumentator==8.0.2
+numpy==2.5.2
