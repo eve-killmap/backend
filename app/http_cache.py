@@ -50,4 +50,6 @@ def binary_cache_response(
     if gzipped:
         headers["Vary"] = "Accept-Encoding"
         headers["Content-Encoding"] = "gzip"
-    return Response(content=body, media_type="application/octet-stream", headers=headers)
+    return Response(
+        content=body, media_type="application/octet-stream", headers=headers
+    )

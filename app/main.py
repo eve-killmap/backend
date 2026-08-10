@@ -131,25 +131,33 @@ if config.metrics.enabled:
     prometheus_metrics.instrument_app(app)
 
 from app.routers import health as health_router
+
 app.include_router(health_router.router)
 
 from app.routers import kills as kills_router
+
 app.include_router(kills_router.router)
 
 from app.routers import systems as systems_router
+
 app.include_router(systems_router.router)
 
 from app.routers import stats as stats_router
+
 app.include_router(stats_router.router)
 
 from app.routers import universe as universe_router
+
 app.include_router(universe_router.router)
 
 from app.routers import ws as ws_router
+
 app.include_router(ws_router.router)
 
 from app.routers import autocomplete as autocomplete_router
+
 app.include_router(autocomplete_router.router)
 
 from app.routers import wars as wars_router
+
 app.include_router(wars_router.router)

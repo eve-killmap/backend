@@ -32,7 +32,9 @@ async def autocomplete_entities(kind: str, q: str, limit: int) -> list[EntityCan
     rows = await db.fetch(_ENTITY_SQL[kind], _escape_like(q), limit)
     return [
         EntityCandidate(
-            id=r["id"], name=r["name"], ticker=r["ticker"],
+            id=r["id"],
+            name=r["name"],
+            ticker=r["ticker"],
             image_url=image_url(kind, r["id"]),
         )
         for r in rows
@@ -43,7 +45,8 @@ async def autocomplete_types(q: str, limit: int) -> list[TypeCandidate]:
     rows = await db.fetch(
         "SELECT id, name FROM types WHERE published AND name ILIKE '%'||$1||'%' ESCAPE '\\' "
         "ORDER BY name LIMIT $2",
-        _escape_like(q), limit,
+        _escape_like(q),
+        limit,
     )
     return [
         TypeCandidate(id=r["id"], name=r["name"], image_url=image_url("type", r["id"]))
@@ -55,7 +58,8 @@ async def autocomplete_weapons(q: str, limit: int) -> list[TypeCandidate]:
     rows = await db.fetch(
         "SELECT type_id AS id, name FROM mv_weapon_search "
         "WHERE name ILIKE '%'||$1||'%' ESCAPE '\\' ORDER BY name LIMIT $2",
-        _escape_like(q), limit,
+        _escape_like(q),
+        limit,
     )
     return [
         TypeCandidate(id=r["id"], name=r["name"], image_url=image_url("type", r["id"]))

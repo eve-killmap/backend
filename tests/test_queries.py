@@ -50,8 +50,12 @@ def test_get_kill_details_cached_hit_metric(monkeypatch):
         position=(0.0, 0.0, 0.0),
         war_id=None,
         victim=Victim(
-            character_id=1, corporation_id=None, alliance_id=None,
-            faction_id=None, damage_taken=1, ship_type_id=587,
+            character_id=1,
+            corporation_id=None,
+            alliance_id=None,
+            faction_id=None,
+            damage_taken=1,
+            ship_type_id=587,
         ),
         attackers=[],
         inserted_time=ts,
@@ -98,10 +102,24 @@ def test_fetch_system_kills_aligns_and_defaults(monkeypatch):
     # Index i in every array must belong to system_ids[i]; a windowed view that
     # lacks a system contributes 0 (COALESCE in SQL), never a shifted/dropped cell.
     rows = [
-        {"solar_system_id": 30000142, "all_count": 100, "day_count": 5,
-         "week_count": 20, "month_count": 60, "six_months_count": 80, "year_count": 90},
-        {"solar_system_id": 30002187, "all_count": 3, "day_count": 0,
-         "week_count": 0, "month_count": 1, "six_months_count": 2, "year_count": 3},
+        {
+            "solar_system_id": 30000142,
+            "all_count": 100,
+            "day_count": 5,
+            "week_count": 20,
+            "month_count": 60,
+            "six_months_count": 80,
+            "year_count": 90,
+        },
+        {
+            "solar_system_id": 30002187,
+            "all_count": 3,
+            "day_count": 0,
+            "week_count": 0,
+            "month_count": 1,
+            "six_months_count": 2,
+            "year_count": 3,
+        },
     ]
     fake = _FakeDbFetch(rows)
     monkeypatch.setattr(queries, "db", fake)
@@ -115,15 +133,25 @@ def test_fetch_system_kills_aligns_and_defaults(monkeypatch):
     assert result.six_months == [80, 2]
     assert result.year == [90, 3]
     # every column is the same length as system_ids
-    assert {len(result.all), len(result.day), len(result.week), len(result.month),
-            len(result.six_months), len(result.year)} == {len(result.system_ids)}
+    assert {
+        len(result.all),
+        len(result.day),
+        len(result.week),
+        len(result.month),
+        len(result.six_months),
+        len(result.year),
+    } == {len(result.system_ids)}
 
     # Guard the SQL shape that makes alignment structural.
     q = fake.query
     assert "FROM mv_kills_per_system" in q
-    for view in ("mv_kills_per_system_24h", "mv_kills_per_system_7d",
-                 "mv_kills_per_system_30d", "mv_kills_per_system_6m",
-                 "mv_kills_per_system_1y"):
+    for view in (
+        "mv_kills_per_system_24h",
+        "mv_kills_per_system_7d",
+        "mv_kills_per_system_30d",
+        "mv_kills_per_system_6m",
+        "mv_kills_per_system_1y",
+    ):
         assert view in q, view
     assert "LEFT JOIN" in q.upper()
     assert "COALESCE" in q.upper()

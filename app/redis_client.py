@@ -105,15 +105,19 @@ async def _enrich_kill(kill: dict) -> dict:
     kill_id = kill.get("killmail_id")
 
     try:
-        character_names, corp_info, alliance_info, _ = await entities.fetch_entity_names(
-            character_ids, set(corp_ids), set(alliance_ids), set()
+        character_names, corp_info, alliance_info, _ = (
+            await entities.fetch_entity_names(
+                character_ids, set(corp_ids), set(alliance_ids), set()
+            )
         )
         type_names = await get_type_names(type_ids)
         names: dict[int, str] = {**character_names, **type_names}
     except Exception as exc:
         pm.errors.labels(component="broadcaster").inc()
         logger.warning(
-            "Kill enrichment DB lookup failed for kill %s: %s", kill_id, exc or repr(exc)
+            "Kill enrichment DB lookup failed for kill %s: %s",
+            kill_id,
+            exc or repr(exc),
         )
         names = {}
         corp_info = {}

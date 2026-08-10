@@ -29,14 +29,24 @@ def test_processed_cached_bytes_have_no_null_fields(monkeypatch):
         position=(0.0, 0.0, 0.0),
         war_id=None,
         victim=Victim(
-            character_id=1, corporation_id=None, alliance_id=None, faction_id=None,
-            damage_taken=10, ship_type_id=587,
+            character_id=1,
+            corporation_id=None,
+            alliance_id=None,
+            faction_id=None,
+            damage_taken=10,
+            ship_type_id=587,
         ),
         attackers=[
             Attacker(
-                character_id=2, corporation_id=None, alliance_id=None, faction_id=None,
-                ship_type_id=587, weapon_type_id=None, damage_done=10,
-                final_blow=True, security_status=0.0,
+                character_id=2,
+                corporation_id=None,
+                alliance_id=None,
+                faction_id=None,
+                ship_type_id=587,
+                weapon_type_id=None,
+                damage_done=10,
+                final_blow=True,
+                security_status=0.0,
             )
         ],
         inserted_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -62,7 +72,10 @@ def test_processed_cached_bytes_have_no_null_fields(monkeypatch):
     parsed = json.loads(captured["value"])
     # exclude_none: no key anywhere should have a null value
     assert _no_nulls(parsed)
-    assert resp.headers["Cache-Control"] == f"public, max-age={kills.config.cache.kill_detail_processed_ttl}"
+    assert (
+        resp.headers["Cache-Control"]
+        == f"public, max-age={kills.config.cache.kill_detail_processed_ttl}"
+    )
     assert resp.headers["ETag"] == '"e"'
 
 
@@ -108,7 +121,10 @@ def test_raw_details_sets_etag_and_max_age(monkeypatch):
     monkeypatch.setattr(kills, "get_kill_details_cached", fake_cached)
     resp = asyncio.run(kills.get_kill_details("1,2,3", if_none_match=None))
     assert resp.status_code == 200
-    assert resp.headers["Cache-Control"] == f"public, max-age={kills.config.cache.kill_detail_ttl}"
+    assert (
+        resp.headers["Cache-Control"]
+        == f"public, max-age={kills.config.cache.kill_detail_ttl}"
+    )
     assert resp.headers["ETag"].startswith('"')
     assert "Content-Encoding" not in resp.headers  # compression left to middleware
 

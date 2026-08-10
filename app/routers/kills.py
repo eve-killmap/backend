@@ -77,7 +77,8 @@ async def get_kill_details_processed(
 
                 if not attackers:
                     raise HTTPException(
-                        status_code=500, detail="Killmail data is malformed: no attackers"
+                        status_code=500,
+                        detail="Killmail data is malformed: no attackers",
                     )
 
                 final_blow_idx = next(
@@ -170,7 +171,11 @@ async def get_kill_details_processed(
                     ),
                     get_type_names(type_ids_to_resolve),
                 )
-                names: dict[int, str] = {**character_names, **faction_names, **type_names}
+                names: dict[int, str] = {
+                    **character_names,
+                    **faction_names,
+                    **type_names,
+                }
 
                 def build_attacker(atk) -> AttackerProcessed:
                     if atk.character_id is None:
@@ -204,7 +209,9 @@ async def get_kill_details_processed(
                         character_alliance=alliance[0] if alliance else None,
                         character_alliance_ticker=alliance[1] if alliance else None,
                         character_faction=(
-                            names.get(atk.faction_id) if atk.faction_id is not None else None
+                            names.get(atk.faction_id)
+                            if atk.faction_id is not None
+                            else None
                         ),
                         ship=ship,
                         weapon=(
@@ -235,13 +242,17 @@ async def get_kill_details_processed(
                 victim_processed = VictimProcessed(
                     character=victim_name,
                     character_corporation=victim_corp[0] if victim_corp else None,
-                    character_corporation_ticker=victim_corp[1] if victim_corp else None,
+                    character_corporation_ticker=(
+                        victim_corp[1] if victim_corp else None
+                    ),
                     character_alliance=victim_alliance[0] if victim_alliance else None,
                     character_alliance_ticker=(
                         victim_alliance[1] if victim_alliance else None
                     ),
                     character_faction=(
-                        names.get(victim.faction_id) if victim.faction_id is not None else None
+                        names.get(victim.faction_id)
+                        if victim.faction_id is not None
+                        else None
                     ),
                     damage_taken=victim.damage_taken,
                 )

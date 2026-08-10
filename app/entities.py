@@ -18,10 +18,13 @@ def set_redis(redis_client: aioredis.Redis) -> None:
     global _redis
     _redis = redis_client
 
+
 _CHAR_SQL = "SELECT character_id AS id, name FROM characters WHERE character_id = ANY($1::bigint[])"
 _CORP_SQL = "SELECT corporation_id AS id, name, ticker FROM corporations WHERE corporation_id = ANY($1::int[])"
 _ALLIANCE_SQL = "SELECT alliance_id AS id, name, ticker FROM alliances WHERE alliance_id = ANY($1::int[])"
-_FACTION_SQL = "SELECT faction_id AS id, name FROM factions WHERE faction_id = ANY($1::int[])"
+_FACTION_SQL = (
+    "SELECT faction_id AS id, name FROM factions WHERE faction_id = ANY($1::int[])"
+)
 
 
 async def _fetch(sql: str, ids: set[int]) -> list[asyncpg.Record]:
@@ -43,7 +46,12 @@ async def fetch_entity_names(
     faction_ids: set[int],
     *,
     emit_metrics: bool = True,
-) -> tuple[dict[int, str], dict[int, tuple[str, str]], dict[int, tuple[str, str]], dict[int, str]]:
+) -> tuple[
+    dict[int, str],
+    dict[int, tuple[str, str]],
+    dict[int, tuple[str, str]],
+    dict[int, str],
+]:
     """Resolve entity ids to names/tickers from the DB reference tables.
 
     Returns (character_names, corp_info{id:(name,ticker)}, alliance_info{id:(name,ticker)},
@@ -60,8 +68,14 @@ async def fetch_entity_names(
     )
 
     character_names = {r["id"]: r["name"] for r in char_rows if r["name"] is not None}
-    corp_info = {r["id"]: (r["name"], r["ticker"]) for r in corp_rows if r["name"] is not None}
-    alliance_info = {r["id"]: (r["name"], r["ticker"]) for r in alliance_rows if r["name"] is not None}
+    corp_info = {
+        r["id"]: (r["name"], r["ticker"]) for r in corp_rows if r["name"] is not None
+    }
+    alliance_info = {
+        r["id"]: (r["name"], r["ticker"])
+        for r in alliance_rows
+        if r["name"] is not None
+    }
     faction_names = {r["id"]: r["name"] for r in faction_rows if r["name"] is not None}
 
     if emit_metrics:
@@ -91,7 +105,9 @@ def _epoch(value) -> int | None:
     return int(value.timestamp()) if value is not None else None
 
 
-def _participant(corp_id, alliance_id, ships_killed, corp_info, alliance_info) -> WarParticipant:
+def _participant(
+    corp_id, alliance_id, ships_killed, corp_info, alliance_info
+) -> WarParticipant:
     corp = corp_info.get(corp_id) if corp_id is not None else None
     alliance = alliance_info.get(alliance_id) if alliance_id is not None else None
     return WarParticipant(
@@ -124,13 +140,19 @@ async def search_wars(
 
     if aggressor is not None:
         kind, aid = aggressor
-        col = "aggressor_alliance_id" if kind == "alliance" else "aggressor_corporation_id"
+        col = (
+            "aggressor_alliance_id"
+            if kind == "alliance"
+            else "aggressor_corporation_id"
+        )
         params.append(aid)
         clauses.append(f"{col} = ${len(params)}")
 
     if defender is not None:
         kind, did = defender
-        dcol = "defender_alliance_id" if kind == "alliance" else "defender_corporation_id"
+        dcol = (
+            "defender_alliance_id" if kind == "alliance" else "defender_corporation_id"
+        )
         acol = "ally_alliance_ids" if kind == "alliance" else "ally_corporation_ids"
         params.append(did)
         dclause = f"{dcol} = ${len(params)}"
@@ -233,12 +255,18 @@ def build_war_processed(war_row, corp_info, alliance_info) -> WarProcessed:
     """Build WarProcessed from a resolved war row + already-resolved corp/alliance dicts."""
     return WarProcessed(
         aggressor=_participant(
-            war_row["aggressor_corporation_id"], war_row["aggressor_alliance_id"],
-            war_row["aggressor_ships_killed"], corp_info, alliance_info,
+            war_row["aggressor_corporation_id"],
+            war_row["aggressor_alliance_id"],
+            war_row["aggressor_ships_killed"],
+            corp_info,
+            alliance_info,
         ),
         defender=_participant(
-            war_row["defender_corporation_id"], war_row["defender_alliance_id"],
-            war_row["defender_ships_killed"], corp_info, alliance_info,
+            war_row["defender_corporation_id"],
+            war_row["defender_alliance_id"],
+            war_row["defender_ships_killed"],
+            corp_info,
+            alliance_info,
         ),
         declared=_epoch(war_row["declared"]),
         finished=_epoch(war_row["finished"]),

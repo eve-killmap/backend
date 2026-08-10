@@ -80,7 +80,9 @@ class QueryCache:
         _start = time.perf_counter()
         try:
             await self._redis.set(
-                f"query:{QUERY_KEY_VERSION}:{prefix}:{_hash_params(params)}", frame, ex=ttl
+                f"query:{QUERY_KEY_VERSION}:{prefix}:{_hash_params(params)}",
+                frame,
+                ex=ttl,
             )
         except RedisError as exc:
             pm.errors.labels(component="cache").inc()

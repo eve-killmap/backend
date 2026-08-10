@@ -19,8 +19,13 @@ def test_module_imports_and_registers():
 def test_singletons_accept_calls():
     # Every labeled metric accepts a call over its documented enum without raising.
     for cache in (
-        "system_rankings", "farthest_kill", "sov", "kill_details",
-        "kill_details_processed", "binary", "type_name",
+        "system_rankings",
+        "farthest_kill",
+        "sov",
+        "kill_details",
+        "kill_details_processed",
+        "binary",
+        "type_name",
     ):
         pm.cache_hits.labels(cache=cache).inc()
         pm.cache_misses.labels(cache=cache).inc()
@@ -76,13 +81,9 @@ def test_start_exporter_enabled_binds_once(tmp_path, monkeypatch):
     pm.start_exporter(cfg)
     pm.start_exporter(cfg)  # idempotent
     assert calls == [((9109,), {"addr": "127.0.0.1"})]
-    assert REGISTRY.get_sample_value(
-        "eve_killmap_service_start_timestamp_seconds"
-    ) > 0
+    assert REGISTRY.get_sample_value("eve_killmap_service_start_timestamp_seconds") > 0
     assert (
-        REGISTRY.get_sample_value(
-            "eve_killmap_service_info", {"version": "1.0.0"}
-        )
+        REGISTRY.get_sample_value("eve_killmap_service_info", {"version": "1.0.0"})
         == 1.0
     )
 

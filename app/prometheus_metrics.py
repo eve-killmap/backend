@@ -51,7 +51,9 @@ service_info = Info(
 cache_hits = Counter(
     "eve_killmap_cache_hits",
     "Response-cache hits, by cache.",
-    ["cache"],  # system_rankings|farthest_kill|sov|kill_details|kill_details_processed|binary|type_name
+    [
+        "cache"
+    ],  # system_rankings|farthest_kill|sov|kill_details|kill_details_processed|binary|type_name
 )
 cache_misses = Counter(
     "eve_killmap_cache_misses",
@@ -84,7 +86,10 @@ cache_keys_evicted = Counter(
 esi_requests = Counter(
     "eve_killmap_esi_requests",
     "ESI HTTP responses, by endpoint and outcome.",
-    ["endpoint", "outcome"],  # endpoint: names|corporation|alliance|war|sov  outcome: ok|not_found|rate_limited|error
+    [
+        "endpoint",
+        "outcome",
+    ],  # endpoint: names|corporation|alliance|war|sov  outcome: ok|not_found|rate_limited|error
 )
 esi_request_seconds = Histogram(
     "eve_killmap_esi_request_seconds",
@@ -106,7 +111,10 @@ esi_cache_misses = Counter(
 entity_lookups = Counter(
     "eve_killmap_entity_lookups",
     "Entity name resolutions from the DB reference tables, by kind and result.",
-    ["kind", "result"],  # kind: character|corporation|alliance|faction  result: found|missing
+    [
+        "kind",
+        "result",
+    ],  # kind: character|corporation|alliance|faction  result: found|missing
 )
 war_lookups = Counter(
     "eve_killmap_war_lookups",
@@ -154,7 +162,10 @@ stream_consumer_lag_seconds = Gauge(
 ws_connections = Counter(
     "eve_killmap_ws_connections",
     "WebSocket connection attempts, by transport and outcome.",
-    ["transport", "outcome"],  # transport: ws  outcome: accepted|rejected_origin|rejected_capacity|unavailable
+    [
+        "transport",
+        "outcome",
+    ],  # transport: ws  outcome: accepted|rejected_origin|rejected_capacity|unavailable
 )
 live_clients = Gauge(
     "eve_killmap_live_clients",
@@ -190,7 +201,10 @@ facet_query_seconds = Histogram(
 autocomplete_requests = Counter(
     "eve_killmap_autocomplete_requests",
     "Autocomplete requests, by picker kind and outcome.",
-    ["kind", "outcome"],  # kind: character|corporation|alliance|faction|type|weapon  outcome: served|short_circuit
+    [
+        "kind",
+        "outcome",
+    ],  # kind: character|corporation|alliance|faction|type|weapon  outcome: served|short_circuit
 )
 filter_conditions = Histogram(
     "eve_killmap_filter_conditions",

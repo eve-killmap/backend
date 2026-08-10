@@ -122,7 +122,9 @@ def encode_kills_binary(
     client-side. Delta-varint coding is order-independent, so either is valid.
     """
     if len(killmail_ids) < _NUMPY_MIN_ROWS:
-        return _encode_kills_binary_scalar(killmail_ids, killmail_times, x, y, z, ship_types)
+        return _encode_kills_binary_scalar(
+            killmail_ids, killmail_times, x, y, z, ship_types
+        )
     buf = bytearray(struct.pack(">I", len(killmail_ids)))
     buf += _delta_varint_column(killmail_ids)
     buf += _delta_varint_column(killmail_times)

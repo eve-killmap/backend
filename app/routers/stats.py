@@ -55,13 +55,20 @@ async def get_system_kills_stats(
     (``f=`` params) compute from ``kill_facets`` and cache under a separate
     prefix with their own TTL."""
     if flt.is_empty:
-        prefix, ttl, lock, params = "system_kills", config.cache.rankings_ttl, "system_kills", {}
+        prefix, ttl, lock, params = (
+            "system_kills",
+            config.cache.rankings_ttl,
+            "system_kills",
+            {},
+        )
         builder = fetch_system_kills
     else:
         key = flt.canonical()
         prefix, ttl, lock, params = (
-            "system_kills_filtered", config.cache.filtered_map_ttl,
-            f"system_kills_filtered:{key}", {"filter": key},
+            "system_kills_filtered",
+            config.cache.filtered_map_ttl,
+            f"system_kills_filtered:{key}",
+            {"filter": key},
         )
 
         async def builder():
@@ -73,6 +80,8 @@ async def get_system_kills_stats(
             res = await query_cache.get(prefix, params)
             if res is None:
                 result = await builder()
-                res = await query_cache.set(prefix, params, result.model_dump_json(), ttl=ttl)
+                res = await query_cache.set(
+                    prefix, params, result.model_dump_json(), ttl=ttl
+                )
     etag, gzipped, body = res
     return json_cache_response(body, gzipped, etag, ttl, if_none_match)

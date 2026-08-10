@@ -29,7 +29,9 @@ async def autocomplete_entities_endpoint(
     response: Response,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ):
-    response.headers["Cache-Control"] = f"public, max-age={config.cache.autocomplete_ttl}"
+    response.headers["Cache-Control"] = (
+        f"public, max-age={config.cache.autocomplete_ttl}"
+    )
     kind_label = getattr(kind, "value", kind)
     if len(q.strip()) < config.limits.autocomplete_min_length:
         pm.autocomplete_requests.labels(kind=kind_label, outcome="short_circuit").inc()
@@ -46,7 +48,9 @@ async def autocomplete_types_endpoint(
     response: Response,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ):
-    response.headers["Cache-Control"] = f"public, max-age={config.cache.autocomplete_ttl}"
+    response.headers["Cache-Control"] = (
+        f"public, max-age={config.cache.autocomplete_ttl}"
+    )
     if len(q.strip()) < config.limits.autocomplete_min_length:
         pm.autocomplete_requests.labels(kind="type", outcome="short_circuit").inc()
         return []
@@ -60,7 +64,9 @@ async def autocomplete_weapons_endpoint(
     response: Response,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ):
-    response.headers["Cache-Control"] = f"public, max-age={config.cache.autocomplete_ttl}"
+    response.headers["Cache-Control"] = (
+        f"public, max-age={config.cache.autocomplete_ttl}"
+    )
     if len(q.strip()) < config.limits.autocomplete_min_length:
         pm.autocomplete_requests.labels(kind="weapon", outcome="short_circuit").inc()
         return []

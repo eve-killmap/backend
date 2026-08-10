@@ -49,17 +49,19 @@ def test_duplicate_conditions_deduped():
 
 def test_validation_errors():
     with pytest.raises(FilterError):
-        parse_filter(["bogus:victim:1"], **L)          # unknown attribute
+        parse_filter(["bogus:victim:1"], **L)  # unknown attribute
     with pytest.raises(FilterError):
-        parse_filter(["alliance:sideways:1"], **L)     # unknown side
+        parse_filter(["alliance:sideways:1"], **L)  # unknown side
     with pytest.raises(FilterError):
         parse_filter(["alliance:victim:notanint"], **L)
     with pytest.raises(FilterError):
         parse_filter(["alliance:victim:-3"], **L)
     with pytest.raises(FilterError):
-        parse_filter(["alliance:victim:"], **L)        # missing ids
+        parse_filter(["alliance:victim:"], **L)  # missing ids
     with pytest.raises(FilterError):
-        parse_filter([f"alliance:victim:{','.join(str(i) for i in range(1, 52))}"], **L)  # >max_ids
+        parse_filter(
+            [f"alliance:victim:{','.join(str(i) for i in range(1, 52))}"], **L
+        )  # >max_ids
     with pytest.raises(FilterError):
         parse_filter([f"war:{i}" for i in range(1, 10)], **L)  # >max_conditions
 
@@ -77,7 +79,7 @@ def test_map_single_condition_sql():
     assert "COUNT(DISTINCT killmail_id)" in sql
     assert "FILTER (WHERE killmail_time > now()-interval '24 hours')" in sql
     assert "facet_value = ANY($2::bigint[])" in sql
-    assert params == [3, [99005338], 1]          # kind, values, role
+    assert params == [3, [99005338], 1]  # kind, values, role
 
 
 def test_map_war_any_has_no_value_param():
@@ -102,7 +104,7 @@ def test_system_single_condition_sql():
     sql, params = build_system_sql(f, 30000142)
     assert "SELECT DISTINCT killmail_id" in sql
     assert "solar_system_id = $" in sql
-    assert "role" not in sql        # involved omits role
+    assert "role" not in sql  # involved omits role
     assert 30000142 in params
 
 

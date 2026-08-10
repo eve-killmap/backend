@@ -93,7 +93,9 @@ def test_full_path_single_flight_collapses_builds(monkeypatch):
     monkeypatch.setattr(systems, "kills_binary_cache", cache)
 
     async def go():
-        return await asyncio.gather(*[systems.get_system_kills(30009003, since=None) for _ in range(8)])
+        return await asyncio.gather(
+            *[systems.get_system_kills(30009003, since=None) for _ in range(8)]
+        )
 
     resps = asyncio.run(go())
     assert len(calls) == 1
@@ -136,9 +138,12 @@ def test_full_path_empty_system_uses_wallclock(monkeypatch):
 
 def _expected(result):
     return encode_kills_binary(
-        result["killmail_ids"], result["killmail_times"],
-        [int(v) for v in result["x"]], [int(v) for v in result["y"]],
-        [int(v) for v in result["z"]], result["ship_types"],
+        result["killmail_ids"],
+        result["killmail_times"],
+        [int(v) for v in result["x"]],
+        [int(v) for v in result["y"]],
+        [int(v) for v in result["z"]],
+        result["ship_types"],
     )
 
 
@@ -148,11 +153,12 @@ def test_encode_maybe_offload_uses_thread_for_large(monkeypatch):
     async def rec(fn, *a):
         calls["n"] += 1
         return fn(*a)
+
     monkeypatch.setattr(systems.asyncio, "to_thread", rec)
     result = _columns(list(range(2000)))
     out = asyncio.run(systems._encode_maybe_offload(result, 2000))
-    assert calls["n"] == 1                 # offloaded to a thread
-    assert out == _expected(result)        # ...and byte-identical
+    assert calls["n"] == 1  # offloaded to a thread
+    assert out == _expected(result)  # ...and byte-identical
 
 
 def test_encode_maybe_offload_inline_for_small(monkeypatch):
@@ -161,8 +167,9 @@ def test_encode_maybe_offload_inline_for_small(monkeypatch):
     async def rec(fn, *a):
         calls["n"] += 1
         return fn(*a)
+
     monkeypatch.setattr(systems.asyncio, "to_thread", rec)
     result = _columns([1, 2, 3])
     out = asyncio.run(systems._encode_maybe_offload(result, 2000))
-    assert calls["n"] == 0                 # below threshold → inline, no thread hop
+    assert calls["n"] == 0  # below threshold → inline, no thread hop
     assert out == _expected(result)

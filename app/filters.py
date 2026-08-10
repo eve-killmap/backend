@@ -3,8 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 ATTRIBUTE_KINDS = {
-    "character": 1, "corporation": 2, "alliance": 3,
-    "faction": 4, "ship": 5, "weapon": 6, "war": 7,
+    "character": 1,
+    "corporation": 2,
+    "alliance": 3,
+    "faction": 4,
+    "ship": 5,
+    "weapon": 6,
+    "war": 7,
 }
 SIDE_ROLES: dict[str, int | None] = {"victim": 0, "attacker": 1, "involved": None}
 
@@ -81,7 +86,9 @@ def _parse_one(raw: str, max_ids: int) -> Condition:
     side = bits[1]
     if side not in SIDE_ROLES:
         raise FilterError(f"unknown side: {side!r}")
-    return Condition(facet_kind=kind, role=SIDE_ROLES[side], values=_parse_ids(bits[2], max_ids))
+    return Condition(
+        facet_kind=kind, role=SIDE_ROLES[side], values=_parse_ids(bits[2], max_ids)
+    )
 
 
 def _sort_key(c: Condition) -> tuple:

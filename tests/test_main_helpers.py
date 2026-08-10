@@ -32,7 +32,9 @@ def test_request_middleware_adds_wildcard_acao(monkeypatch):
     from starlette.responses import Response
     import app.main as main
 
-    monkeypatch.setattr(main, "config", SimpleNamespace(cors=SimpleNamespace(allow_origins=["*"])))
+    monkeypatch.setattr(
+        main, "config", SimpleNamespace(cors=SimpleNamespace(allow_origins=["*"]))
+    )
 
     async def call_next(_req):
         return Response("ok")
@@ -49,7 +51,11 @@ def test_request_middleware_no_acao_for_specific_origins(monkeypatch):
     import app.main as main
 
     monkeypatch.setattr(
-        main, "config", SimpleNamespace(cors=SimpleNamespace(allow_origins=["https://eve-killmap.com"]))
+        main,
+        "config",
+        SimpleNamespace(
+            cors=SimpleNamespace(allow_origins=["https://eve-killmap.com"])
+        ),
     )
 
     async def call_next(_req):

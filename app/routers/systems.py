@@ -91,7 +91,9 @@ async def get_system_kills(
                 # exceeds the payload's completeness edge (design §3).
                 latest = await get_system_latest(solar_system_id)
                 fresh_to = latest if latest is not None else int(time.time())
-                result = await fetch_raw_kills(solar_system_id=solar_system_id, since=None)
+                result = await fetch_raw_kills(
+                    solar_system_id=solar_system_id, since=None
+                )
                 encoded = await _encode_maybe_offload(
                     result, config.limits.encode_offload_min_rows
                 )
@@ -114,12 +116,16 @@ async def get_system_kills_filtered(
     the complete matching id mask, not paginated.
     """
     if flt.is_empty:
-        raise HTTPException(status_code=400, detail="at least one filter condition (f=) is required")
+        raise HTTPException(
+            status_code=400, detail="at least one filter condition (f=) is required"
+        )
     result = await fetch_filtered_system_kill_ids(solar_system_id, flt)
     return Response(
         content=result.model_dump_json(),
         media_type="application/json",
-        headers={"Cache-Control": f"public, max-age={config.cache.filtered_system_ttl}"},
+        headers={
+            "Cache-Control": f"public, max-age={config.cache.filtered_system_ttl}"
+        },
     )
 
 
@@ -197,9 +203,7 @@ async def get_system_sov(
                     ttl=config.cache.sov_ttl,
                 )
     etag, gzipped, body = res
-    return json_cache_response(
-        body, gzipped, etag, config.cache.sov_ttl, if_none_match
-    )
+    return json_cache_response(body, gzipped, etag, config.cache.sov_ttl, if_none_match)
 
 
 @router.get("/systems/{solar_system_id}/farthest_kill", response_model=None)

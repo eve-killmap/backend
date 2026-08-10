@@ -8,8 +8,12 @@ from app.security import validate_id_list
 from app.queries import get_type_names
 from app import entities
 from app.id_ranges import (
-    classify_id, CATEGORY_TYPE, CATEGORY_FACTION, CATEGORY_CHARACTER,
-    CATEGORY_CORPORATION, CATEGORY_ALLIANCE,
+    classify_id,
+    CATEGORY_TYPE,
+    CATEGORY_FACTION,
+    CATEGORY_CHARACTER,
+    CATEGORY_CORPORATION,
+    CATEGORY_ALLIANCE,
 )
 from app.eve_images import image_url
 from app.models import NameResolution
@@ -51,20 +55,40 @@ async def resolve_universe_names(
             corp_ids.add(i)
             alliance_ids.add(i)
 
-    type_names, (char_names, corp_info, alliance_info, faction_names) = await asyncio.gather(
-        get_type_names(type_ids),
-        entities.fetch_entity_names(char_ids, corp_ids, alliance_ids, faction_ids, emit_metrics=False),
+    type_names, (char_names, corp_info, alliance_info, faction_names) = (
+        await asyncio.gather(
+            get_type_names(type_ids),
+            entities.fetch_entity_names(
+                char_ids, corp_ids, alliance_ids, faction_ids, emit_metrics=False
+            ),
+        )
     )
 
     out: dict[int, NameResolution] = {}
     for i, name in type_names.items():
-        out[i] = NameResolution(category="type", name=name, image_url=image_url("type", i))
+        out[i] = NameResolution(
+            category="type", name=name, image_url=image_url("type", i)
+        )
     for i, name in char_names.items():
-        out[i] = NameResolution(category="character", name=name, image_url=image_url("character", i))
+        out[i] = NameResolution(
+            category="character", name=name, image_url=image_url("character", i)
+        )
     for i, (name, ticker) in corp_info.items():
-        out[i] = NameResolution(category="corporation", name=name, ticker=ticker, image_url=image_url("corporation", i))
+        out[i] = NameResolution(
+            category="corporation",
+            name=name,
+            ticker=ticker,
+            image_url=image_url("corporation", i),
+        )
     for i, (name, ticker) in alliance_info.items():
-        out[i] = NameResolution(category="alliance", name=name, ticker=ticker, image_url=image_url("alliance", i))
+        out[i] = NameResolution(
+            category="alliance",
+            name=name,
+            ticker=ticker,
+            image_url=image_url("alliance", i),
+        )
     for i, name in faction_names.items():
-        out[i] = NameResolution(category="faction", name=name, image_url=image_url("faction", i))
+        out[i] = NameResolution(
+            category="faction", name=name, image_url=image_url("faction", i)
+        )
     return out

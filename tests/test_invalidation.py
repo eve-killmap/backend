@@ -69,7 +69,9 @@ def test_subscriber_subscribes_on_bus_and_deletes_on_cache():
     msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
     pubsub = _FakePubSub([{"type": "subscribe"}, msg])
     bus = _FakeBus(pubsub)
-    cache = _FakeCache(["query:v2:sov:abc", "query:v2:sov:def", "query:v2:system_rankings:x"])
+    cache = _FakeCache(
+        ["query:v2:sov:abc", "query:v2:sov:def", "query:v2:system_rankings:x"]
+    )
 
     asyncio.run(invalidation.subscriber_loop(bus, cache, "cache:invalidate"))
 
@@ -124,12 +126,13 @@ def test_subscriber_records_received_and_evicted_metrics():
     r0 = _sample("eve_killmap_cache_invalidations_received_total", {"target": "sov"})
     e0 = _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"})
 
-    asyncio.run(invalidation.subscriber_loop(_FakeBus(pubsub), cache, "cache:invalidate"))
+    asyncio.run(
+        invalidation.subscriber_loop(_FakeBus(pubsub), cache, "cache:invalidate")
+    )
 
     assert (
-        _sample("eve_killmap_cache_invalidations_received_total", {"target": "sov"}) - r0
+        _sample("eve_killmap_cache_invalidations_received_total", {"target": "sov"})
+        - r0
         == 1
     )
-    assert (
-        _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"}) - e0 == 2
-    )
+    assert _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"}) - e0 == 2

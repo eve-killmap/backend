@@ -56,8 +56,10 @@ def test_acquires_leadership_when_lock_free():
 
 def test_second_instance_stays_follower():
     shared = _FakeLockRedis()
-    b1 = KillBroadcaster(); b1._redis = shared  # type: ignore[assignment]
-    b2 = KillBroadcaster(); b2._redis = shared  # type: ignore[assignment]
+    b1 = KillBroadcaster()
+    b1._redis = shared  # type: ignore[assignment]
+    b2 = KillBroadcaster()
+    b2._redis = shared  # type: ignore[assignment]
     _stub_promote_demote(b1)
     _stub_promote_demote(b2)
 
@@ -70,19 +72,21 @@ def test_second_instance_stays_follower():
 
 def test_follower_takes_over_when_leader_lock_expires():
     shared = _FakeLockRedis()
-    b1 = KillBroadcaster(); b1._redis = shared  # type: ignore[assignment]
-    b2 = KillBroadcaster(); b2._redis = shared  # type: ignore[assignment]
+    b1 = KillBroadcaster()
+    b1._redis = shared  # type: ignore[assignment]
+    b2 = KillBroadcaster()
+    b2._redis = shared  # type: ignore[assignment]
     _stub_promote_demote(b1)
     _stub_promote_demote(b2)
 
-    asyncio.run(b1._election_step())   # b1 leads
-    asyncio.run(b2._election_step())   # b2 follows
+    asyncio.run(b1._election_step())  # b1 leads
+    asyncio.run(b2._election_step())  # b2 follows
     assert b2._is_leader is False
 
     # b1 "dies": its lock expires (simulate by clearing the key).
     shared.store.clear()
 
-    asyncio.run(b2._election_step())   # b2 should now take over
+    asyncio.run(b2._election_step())  # b2 should now take over
     assert b2._is_leader is True
     assert shared.store[_LOCK_KEY] == b2._instance_id
 
@@ -187,10 +191,20 @@ def test_enrich_kill_uses_db(monkeypatch):
     monkeypatch.setattr(rc, "get_type_names", fake_types)
 
     kill = {
-        "killmail_id": 42, "victim_character_id": 1, "victim_ship_type_id": 587,
-        "victim_corporation_id": 10, "victim_alliance_id": 20,
-        "attackers": [{"final_blow": True, "character_id": 1, "ship_type_id": 587,
-                       "corporation_id": 10, "alliance_id": 20}],
+        "killmail_id": 42,
+        "victim_character_id": 1,
+        "victim_ship_type_id": 587,
+        "victim_corporation_id": 10,
+        "victim_alliance_id": 20,
+        "attackers": [
+            {
+                "final_blow": True,
+                "character_id": 1,
+                "ship_type_id": 587,
+                "corporation_id": 10,
+                "alliance_id": 20,
+            }
+        ],
     }
     out = asyncio.run(rc._enrich_kill(kill))
     assert out["v_character_name"] == "Pilot"
@@ -209,8 +223,14 @@ def test_enrich_kill_resilient_on_db_error(monkeypatch):
         return {}
 
     monkeypatch.setattr(rc, "get_type_names", fake_types)
-    kill = {"killmail_id": 7, "victim_character_id": 1, "victim_ship_type_id": 587,
-            "victim_corporation_id": 10, "victim_alliance_id": 20, "attackers": []}
-    out = asyncio.run(rc._enrich_kill(kill))   # must not raise
+    kill = {
+        "killmail_id": 7,
+        "victim_character_id": 1,
+        "victim_ship_type_id": 587,
+        "victim_corporation_id": 10,
+        "victim_alliance_id": 20,
+        "attackers": [],
+    }
+    out = asyncio.run(rc._enrich_kill(kill))  # must not raise
     assert out["v_character_name"] is None
     assert out["v_corporation_name"] is None

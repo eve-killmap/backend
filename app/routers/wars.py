@@ -34,7 +34,9 @@ async def war_search(
     agg = _parse_side(aggressor)
     dfn = _parse_side(defender)
     if agg is None and dfn is None:
-        raise HTTPException(status_code=400, detail="at least one of aggressor/defender required")
+        raise HTTPException(
+            status_code=400, detail="at least one of aggressor/defender required"
+        )
     response.headers["Cache-Control"] = f"public, max-age={config.cache.war_search_ttl}"
     rows = await search_wars(agg, dfn, config.limits.max_war_results)
     return [war_summary_from_row(r) for r in rows]

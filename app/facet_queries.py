@@ -24,8 +24,13 @@ async def fetch_filtered_map(f: Filter) -> SystemKillsResponse:
         six.append(row["six_months_count"])
         year.append(row["year_count"])
     return SystemKillsResponse(
-        system_ids=system_ids, all=all_c, day=day, week=week,
-        month=month, six_months=six, year=year,
+        system_ids=system_ids,
+        all=all_c,
+        day=day,
+        week=week,
+        month=month,
+        six_months=six,
+        year=year,
     )
 
 
@@ -38,6 +43,8 @@ async def fetch_filtered_system_kill_ids(
     try:
         rows = await db.fetch(sql, *params)
     finally:
-        pm.facet_query_seconds.labels(query="system").observe(time.perf_counter() - _start)
+        pm.facet_query_seconds.labels(query="system").observe(
+            time.perf_counter() - _start
+        )
     ids = [r["killmail_id"] for r in rows]
     return SystemKillIdsResponse(count=len(ids), killmail_ids=ids)

@@ -47,10 +47,14 @@ class _FakeInfoRedis:
 
 def test_redis_info_reports_cache_and_stream():
     health.set_redis(
-        _FakeInfoRedis({"used_memory": 100, "connected_clients": 2, "uptime_in_seconds": 30})
+        _FakeInfoRedis(
+            {"used_memory": 100, "connected_clients": 2, "uptime_in_seconds": 30}
+        )
     )
     health.set_bus_redis(
-        _FakeInfoRedis({"used_memory": 200, "connected_clients": 5, "uptime_in_seconds": 60})
+        _FakeInfoRedis(
+            {"used_memory": 200, "connected_clients": 5, "uptime_in_seconds": 60}
+        )
     )
     out = asyncio.run(health.redis_info())
     assert out["cache"]["available"] is True
@@ -61,7 +65,9 @@ def test_redis_info_reports_cache_and_stream():
 
 def test_redis_info_stream_unavailable_when_unset():
     health.set_redis(
-        _FakeInfoRedis({"used_memory": 1, "connected_clients": 1, "uptime_in_seconds": 1})
+        _FakeInfoRedis(
+            {"used_memory": 1, "connected_clients": 1, "uptime_in_seconds": 1}
+        )
     )
     health.set_bus_redis(None)
     out = asyncio.run(health.redis_info())

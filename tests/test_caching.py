@@ -102,7 +102,9 @@ class _FakeRedisGet:
 import hashlib as _hashlib
 
 
-def _query_frame(body_str: str, *, gzipped: bool = False, body_bytes: bytes | None = None) -> bytes:
+def _query_frame(
+    body_str: str, *, gzipped: bool = False, body_bytes: bytes | None = None
+) -> bytes:
     raw = body_str.encode()
     digest = _hashlib.md5(raw).digest()
     stored_body = body_bytes if body_bytes is not None else raw
@@ -112,7 +114,8 @@ def _query_frame(body_str: str, *, gzipped: bool = False, body_bytes: bytes | No
 def test_query_cache_hit_returns_etag_gzip_body():
     from app.cache import QueryCache
 
-    qc = QueryCache(); qc.set_redis(_FakeRedisGet(_query_frame("cached")))
+    qc = QueryCache()
+    qc.set_redis(_FakeRedisGet(_query_frame("cached")))
     res = asyncio.run(qc.get("sov", {"a": 1}))
     assert res is not None
     etag, gzipped, body = res
@@ -124,15 +127,18 @@ def test_query_cache_hit_returns_etag_gzip_body():
 def test_query_cache_miss_returns_none():
     from app.cache import QueryCache
 
-    qc = QueryCache(); qc.set_redis(_FakeRedisGet(None))
+    qc = QueryCache()
+    qc.set_redis(_FakeRedisGet(None))
     assert asyncio.run(qc.get("sov", {"a": 2})) is None
 
 
 def test_query_cache_hit_and_miss_metrics():
     from app.cache import QueryCache
 
-    hit = QueryCache(); hit.set_redis(_FakeRedisGet(_query_frame("cached")))
-    miss = QueryCache(); miss.set_redis(_FakeRedisGet(None))
+    hit = QueryCache()
+    hit.set_redis(_FakeRedisGet(_query_frame("cached")))
+    miss = QueryCache()
+    miss.set_redis(_FakeRedisGet(None))
 
     h0 = _sample("eve_killmap_cache_hits_total", {"cache": "sov"})
     m0 = _sample("eve_killmap_cache_misses_total", {"cache": "sov"})
@@ -159,11 +165,12 @@ def test_query_cache_set_frames_and_returns_shape():
     from app.cache import QueryCache
 
     store = _FakeRedisStore()
-    qc = QueryCache(); qc.set_redis(store)
+    qc = QueryCache()
+    qc.set_redis(store)
     etag, gzipped, body = asyncio.run(qc.set("sov", {"a": 1}, '{"x":1}', ttl=10))
 
     assert etag == '"' + _hashlib.md5(b'{"x":1}').hexdigest() + '"'
-    assert gzipped is False               # 7 bytes < 1000
+    assert gzipped is False  # 7 bytes < 1000
     assert body == b'{"x":1}'
     (frame,) = store.stored.values()
     assert frame == bytes([0]) + _hashlib.md5(b'{"x":1}').digest() + b'{"x":1}'
@@ -174,9 +181,12 @@ def test_query_cache_set_gzips_large_body():
     from app.cache import QueryCache
 
     store = _FakeRedisStore()
-    qc = QueryCache(); qc.set_redis(store)
+    qc = QueryCache()
+    qc.set_redis(store)
     big = "a" * 5000
-    etag, gzipped, body = asyncio.run(qc.set("system_rankings", {"limit": 10}, big, ttl=10))
+    etag, gzipped, body = asyncio.run(
+        qc.set("system_rankings", {"limit": 10}, big, ttl=10)
+    )
     assert gzipped is True
     assert _gzip.decompress(body) == big.encode()
     assert etag == '"' + _hashlib.md5(big.encode()).hexdigest() + '"'
@@ -185,7 +195,8 @@ def test_query_cache_set_gzips_large_body():
 def test_query_cache_set_times_op():
     from app.cache import QueryCache
 
-    qc = QueryCache(); qc.set_redis(_FakeRedisStore())
+    qc = QueryCache()
+    qc.set_redis(_FakeRedisStore())
     s0 = _sample("eve_killmap_redis_command_seconds_count", {"op": "set"})
     asyncio.run(qc.set("sov", {"a": 1}, "value", ttl=10))
     assert _sample("eve_killmap_redis_command_seconds_count", {"op": "set"}) - s0 == 1
@@ -201,8 +212,7 @@ def test_esi_corp_cache_hit_metric():
     result = asyncio.run(client.get_corporation_info(123))
     assert result == ("CorpName", "TICK")
     assert (
-        _sample("eve_killmap_esi_cache_hits_total", {"entity": "corporation"}) - h0
-        == 1
+        _sample("eve_killmap_esi_cache_hits_total", {"entity": "corporation"}) - h0 == 1
     )
 
 
@@ -220,7 +230,8 @@ class _FakeRedisRaising:
 def test_query_cache_get_degrades_on_redis_error():
     from app.cache import QueryCache
 
-    qc = QueryCache(); qc.set_redis(_FakeRedisRaising())
+    qc = QueryCache()
+    qc.set_redis(_FakeRedisRaising())
     e0 = _sample("eve_killmap_errors_total", {"component": "cache"})
     result = asyncio.run(qc.get("sov", {"a": 1}))  # must not raise
     assert result is None
@@ -230,7 +241,8 @@ def test_query_cache_get_degrades_on_redis_error():
 def test_query_cache_set_degrades_but_returns_body():
     from app.cache import QueryCache
 
-    qc = QueryCache(); qc.set_redis(_FakeRedisRaising())
+    qc = QueryCache()
+    qc.set_redis(_FakeRedisRaising())
     e0 = _sample("eve_killmap_errors_total", {"component": "cache"})
     res = asyncio.run(qc.set("sov", {"a": 1}, "value", ttl=10))  # must not raise
     assert res is not None
@@ -249,7 +261,8 @@ def _binary_frame(body: bytes, *, fresh_to: int, gzipped: bool = False) -> bytes
 def test_binary_cache_hit_returns_fresh_to_and_body():
     from app.cache import KillsBinaryCache
 
-    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisGet(_binary_frame(b"\x01\x02", fresh_to=1234)))
+    kbc = KillsBinaryCache()
+    kbc.set_redis(_FakeRedisGet(_binary_frame(b"\x01\x02", fresh_to=1234)))
     res = asyncio.run(kbc.get({"solar_system_id": 1}))
     assert res is not None
     fresh_to, gzipped, body = res
@@ -261,7 +274,8 @@ def test_binary_cache_hit_returns_fresh_to_and_body():
 def test_binary_cache_miss_uses_binary_label():
     from app.cache import KillsBinaryCache
 
-    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisGet(None))
+    kbc = KillsBinaryCache()
+    kbc.set_redis(_FakeRedisGet(None))
     m0 = _sample("eve_killmap_cache_misses_total", {"cache": "binary"})
     assert asyncio.run(kbc.get({"a": 1})) is None
     assert _sample("eve_killmap_cache_misses_total", {"cache": "binary"}) - m0 == 1
@@ -272,7 +286,8 @@ def test_binary_cache_set_frames_and_gzips_large():
     from app.cache import KillsBinaryCache
 
     store = _FakeRedisStore()
-    kbc = KillsBinaryCache(); kbc.set_redis(store)
+    kbc = KillsBinaryCache()
+    kbc.set_redis(store)
     payload = b"k" * 5000
     fresh_to, gzipped, body = asyncio.run(kbc.set({"solar_system_id": 1}, payload, 999))
     assert fresh_to == 999
@@ -286,7 +301,8 @@ def test_binary_cache_set_frames_and_gzips_large():
 def test_binary_cache_set_small_stays_raw():
     from app.cache import KillsBinaryCache
 
-    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisStore())
+    kbc = KillsBinaryCache()
+    kbc.set_redis(_FakeRedisStore())
     fresh_to, gzipped, body = asyncio.run(kbc.set({"solar_system_id": 1}, b"small", 42))
     assert (fresh_to, gzipped, body) == (42, False, b"small")
 
@@ -294,13 +310,15 @@ def test_binary_cache_set_small_stays_raw():
 def test_binary_cache_get_degrades_on_redis_error():
     from app.cache import KillsBinaryCache
 
-    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisRaising())
+    kbc = KillsBinaryCache()
+    kbc.set_redis(_FakeRedisRaising())
     assert asyncio.run(kbc.get({"a": 1})) is None
 
 
 def test_binary_cache_set_degrades_but_returns_body():
     from app.cache import KillsBinaryCache
 
-    kbc = KillsBinaryCache(); kbc.set_redis(_FakeRedisRaising())
+    kbc = KillsBinaryCache()
+    kbc.set_redis(_FakeRedisRaising())
     res = asyncio.run(kbc.set({"a": 1}, b"payload", 7))  # must not raise
     assert res == (7, False, b"payload")

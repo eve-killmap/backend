@@ -257,9 +257,7 @@ def test_metrics_env_beats_yaml(tmp_path):
 
 
 def test_metrics_enabled_and_host_from_yaml(tmp_path):
-    yaml_path = _write_yaml(
-        tmp_path, "metrics:\n  enabled: true\n  host: 10.0.0.5\n"
-    )
+    yaml_path = _write_yaml(tmp_path, "metrics:\n  enabled: true\n  host: 10.0.0.5\n")
     cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
     assert cfg.metrics.enabled is True
     assert cfg.metrics.host == "10.0.0.5"
@@ -349,6 +347,7 @@ def test_cache_redis_bad_int_raises(tmp_path):
 
 def test_filter_limits_have_defaults():
     from app.config import load_config
+
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.limits.max_filter_conditions == 8
     assert cfg.limits.max_filter_ids_per_condition == 50
@@ -356,18 +355,21 @@ def test_filter_limits_have_defaults():
 
 def test_filtered_map_ttl_default():
     from app.config import load_config
+
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.cache.filtered_map_ttl == 1800
 
 
 def test_filtered_system_ttl_default():
     from app.config import load_config
+
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.cache.filtered_system_ttl == 15
 
 
 def test_autocomplete_config_defaults():
     from app.config import load_config
+
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.limits.autocomplete_min_length == 3
     assert cfg.cache.autocomplete_ttl == 60
@@ -375,6 +377,7 @@ def test_autocomplete_config_defaults():
 
 def test_war_config_defaults():
     from app.config import load_config
+
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.limits.max_war_results == 500
     assert cfg.cache.war_search_ttl == 60

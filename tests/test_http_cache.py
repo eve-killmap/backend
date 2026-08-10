@@ -28,7 +28,9 @@ def test_not_modified_matches():
 def test_json_cache_response_uncompressed_omits_vary():
     body = b'{"a":1}'
     etag = compute_etag(body)
-    resp = json_cache_response(body, gzipped=False, etag=etag, max_age=60, if_none_match=None)
+    resp = json_cache_response(
+        body, gzipped=False, etag=etag, max_age=60, if_none_match=None
+    )
     assert resp.status_code == 200
     assert resp.body == body
     assert resp.headers["ETag"] == etag
@@ -40,7 +42,9 @@ def test_json_cache_response_uncompressed_omits_vary():
 def test_json_cache_response_gzipped_sets_content_encoding_and_vary():
     raw = b'{"a":1}'
     gz = gzip.compress(raw, 6)
-    resp = json_cache_response(gz, gzipped=True, etag=compute_etag(raw), max_age=60, if_none_match=None)
+    resp = json_cache_response(
+        gz, gzipped=True, etag=compute_etag(raw), max_age=60, if_none_match=None
+    )
     assert resp.headers["Content-Encoding"] == "gzip"
     assert resp.headers["Vary"] == "Accept-Encoding"
     assert resp.body == gz
@@ -49,7 +53,9 @@ def test_json_cache_response_gzipped_sets_content_encoding_and_vary():
 def test_json_cache_response_304_uncompressed_omits_vary():
     body = b'{"a":1}'
     etag = compute_etag(body)
-    resp = json_cache_response(body, gzipped=False, etag=etag, max_age=60, if_none_match=etag)
+    resp = json_cache_response(
+        body, gzipped=False, etag=etag, max_age=60, if_none_match=etag
+    )
     assert resp.status_code == 304
     assert resp.headers["ETag"] == etag
     assert resp.headers["Cache-Control"] == "public, max-age=60"
@@ -60,7 +66,9 @@ def test_json_cache_response_304_uncompressed_omits_vary():
 def test_json_cache_response_304_gzipped_carries_vary():
     body = b'{"a":1}'
     etag = compute_etag(body)
-    resp = json_cache_response(body, gzipped=True, etag=etag, max_age=60, if_none_match=etag)
+    resp = json_cache_response(
+        body, gzipped=True, etag=etag, max_age=60, if_none_match=etag
+    )
     assert resp.status_code == 304
     assert resp.headers["Vary"] == "Accept-Encoding"
     assert "Content-Encoding" not in resp.headers  # 304 has no body

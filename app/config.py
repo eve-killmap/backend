@@ -318,7 +318,9 @@ def load_config(
             cache_cfg.get("filtered_map_ttl", 1800), "cache.filtered_map_ttl", minimum=1
         ),
         filtered_system_ttl=_as_int(
-            cache_cfg.get("filtered_system_ttl", 15), "cache.filtered_system_ttl", minimum=1
+            cache_cfg.get("filtered_system_ttl", 15),
+            "cache.filtered_system_ttl",
+            minimum=1,
         ),
         autocomplete_ttl=_as_int(
             cache_cfg.get("autocomplete_ttl", 60), "cache.autocomplete_ttl", minimum=1
@@ -333,7 +335,9 @@ def load_config(
 
     cache_redis_keepalive = cache_redis_cfg.get("socket_keepalive", True)
     if not isinstance(cache_redis_keepalive, bool):
-        raise ConfigError("Config value 'cache_redis.socket_keepalive' must be a boolean")
+        raise ConfigError(
+            "Config value 'cache_redis.socket_keepalive' must be a boolean"
+        )
     cache_redis_config = CacheRedisConfig(
         max_connections=_as_int(
             cache_redis_cfg.get("max_connections", 200),
@@ -341,7 +345,9 @@ def load_config(
             minimum=1,
         ),
         pool_timeout=_as_int(
-            cache_redis_cfg.get("pool_timeout", 5), "cache_redis.pool_timeout", minimum=1
+            cache_redis_cfg.get("pool_timeout", 5),
+            "cache_redis.pool_timeout",
+            minimum=1,
         ),
         socket_connect_timeout=_as_int(
             cache_redis_cfg.get("socket_connect_timeout", 5),
@@ -400,27 +406,33 @@ def load_config(
         ),
         max_filter_conditions=_as_int(
             limits_cfg.get("max_filter_conditions", 8),
-            "limits.max_filter_conditions", minimum=1,
+            "limits.max_filter_conditions",
+            minimum=1,
         ),
         max_filter_ids_per_condition=_as_int(
             limits_cfg.get("max_filter_ids_per_condition", 50),
-            "limits.max_filter_ids_per_condition", minimum=1,
+            "limits.max_filter_ids_per_condition",
+            minimum=1,
         ),
         autocomplete_min_length=_as_int(
             limits_cfg.get("autocomplete_min_length", 3),
-            "limits.autocomplete_min_length", minimum=1,
+            "limits.autocomplete_min_length",
+            minimum=1,
         ),
         max_war_results=_as_int(
             limits_cfg.get("max_war_results", 500),
-            "limits.max_war_results", minimum=1,
+            "limits.max_war_results",
+            minimum=1,
         ),
         max_war_ids=_as_int(
             limits_cfg.get("max_war_ids", 200),
-            "limits.max_war_ids", minimum=1,
+            "limits.max_war_ids",
+            minimum=1,
         ),
         encode_offload_min_rows=_as_int(
             limits_cfg.get("encode_offload_min_rows", 2000),
-            "limits.encode_offload_min_rows", minimum=1,
+            "limits.encode_offload_min_rows",
+            minimum=1,
         ),
     )
 
@@ -440,9 +452,7 @@ def load_config(
             )
     else:
         metrics_port_value = metrics_cfg.get("port", 9109)
-    metrics_port = _as_int(
-        metrics_port_value, "metrics.port", minimum=1, maximum=65535
-    )
+    metrics_port = _as_int(metrics_port_value, "metrics.port", minimum=1, maximum=65535)
 
     metrics_config = MetricsConfig(
         enabled=metrics_enabled, host=metrics_host, port=metrics_port
