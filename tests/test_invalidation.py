@@ -15,6 +15,22 @@ def test_patterns_ignores_unknown():
     assert patterns_for_targets(["nope"]) == []
 
 
+def test_sov_and_sov_map_patterns_do_not_collide():
+    # The §2.6 footgun: "query:v2:sov:*" must NOT match a "query:v2:sov_map:<hash>"
+    # key, and vice versa. Assert it via the same prefix logic the subscriber uses.
+    out = patterns_for_targets(["sov", "sov_map"])
+    assert set(out) == {"query:v2:sov:*", "query:v2:sov_map:*"}
+
+    def matches(pattern, key):
+        prefix = pattern[:-1] if pattern.endswith("*") else pattern
+        return key.startswith(prefix)
+
+    assert not matches("query:v2:sov:*", "query:v2:sov_map:abc123")
+    assert not matches("query:v2:sov_map:*", "query:v2:sov:abc123")
+    assert matches("query:v2:sov_map:*", "query:v2:sov_map:abc123")
+    assert matches("query:v2:sov:*", "query:v2:sov:abc123")
+
+
 class _FakePubSub:
     def __init__(self, messages):
         self._messages = messages

@@ -154,6 +154,18 @@ class SovResponse(BaseModel):
     corporation: GroupInfo | None = None
 
 
+class SovereigntyMapResponse(BaseModel):
+    updated_at: int
+    adm_available: bool
+    owner_kinds: list[int]
+    owner_ids: list[int]
+    owner_names: list[str | None]
+    owner_tickers: list[str | None]
+    system_ids: list[int]
+    owner_idx: list[int]
+    adm: list[float]
+
+
 class WorkersSummary(BaseModel):
     worker_count: int
     degraded: bool

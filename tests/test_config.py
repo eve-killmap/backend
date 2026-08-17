@@ -85,6 +85,8 @@ def test_defaults_reproduce_behavior(tmp_path):
     assert cfg.database_url is None
     assert cfg.redis_url is None
     assert "magicmq" not in cfg.user_agent  # PII-free default
+    assert cfg.cache.esi_sov_structures_fallback_ttl == 3600
+    assert cfg.cache.sov_map_ttl == 3600
 
 
 def test_env_overrides_yaml(tmp_path):
@@ -112,6 +114,13 @@ def test_non_integer_pool_size_raises(tmp_path):
     yaml_path = _write_yaml(tmp_path, "database:\n  pool_min_size: notanint\n")
     with pytest.raises(ConfigError):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_sov_ttls_reject_zero(tmp_path):
+    for key in ("esi_sov_structures_fallback_ttl", "sov_map_ttl"):
+        yaml_path = _write_yaml(tmp_path, f"cache:\n  {key}: 0\n")
+        with pytest.raises(ConfigError):
+            load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
 
 
 def test_pool_max_below_min_raises(tmp_path):

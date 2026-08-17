@@ -53,7 +53,7 @@ cache_hits = Counter(
     "Response-cache hits, by cache.",
     [
         "cache"
-    ],  # system_rankings|farthest_kill|sov|kill_details|kill_details_processed|binary|type_name
+    ],  # system_rankings|farthest_kill|sov|sov_map|kill_details|kill_details_processed|binary|type_name
 )
 cache_misses = Counter(
     "eve_killmap_cache_misses",
@@ -72,7 +72,7 @@ redis_command_seconds = Histogram(
 cache_invalidations_received = Counter(
     "eve_killmap_cache_invalidations_received",
     "Cache-invalidation messages received, by target.",
-    ["target"],  # system_rankings|farthest_kill|sov
+    ["target"],  # system_rankings|farthest_kill|sov|sov_map
 )
 cache_keys_evicted = Counter(
     "eve_killmap_cache_keys_evicted",
@@ -89,7 +89,7 @@ esi_requests = Counter(
     [
         "endpoint",
         "outcome",
-    ],  # endpoint: names|corporation|alliance|war|sov  outcome: ok|not_found|rate_limited|error
+    ],  # endpoint: names|corporation|alliance|war|sov|sov_structures  outcome: ok|not_found|rate_limited|error
 )
 esi_request_seconds = Histogram(
     "eve_killmap_esi_request_seconds",
@@ -99,7 +99,7 @@ esi_request_seconds = Histogram(
 esi_cache_hits = Counter(
     "eve_killmap_esi_cache_hits",
     "ESI Redis-cache hits, by entity.",
-    ["entity"],  # character|corporation|alliance|war|sov
+    ["entity"],  # character|corporation|alliance|war|sov|sov_structures
 )
 esi_cache_misses = Counter(
     "eve_killmap_esi_cache_misses",
@@ -141,7 +141,7 @@ stream_read_interruptions = Counter(
 sov_refreshes = Counter(
     "eve_killmap_sov_refreshes",
     "Sov-map refresh cycles at the leader, by outcome.",
-    ["outcome"],  # ok|error
+    ["outcome"],  # ok|error|degraded
 )
 stream_entries_read = Counter(
     "eve_killmap_stream_entries_read",

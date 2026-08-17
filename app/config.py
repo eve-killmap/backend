@@ -65,6 +65,7 @@ class CacheConfig:
     esi_corp_ttl: int
     esi_alliance_ttl: int
     esi_sov_fallback_ttl: int
+    esi_sov_structures_fallback_ttl: int
     rankings_ttl: int
     sov_ttl: int
     farthest_kill_ttl: int
@@ -76,6 +77,7 @@ class CacheConfig:
     autocomplete_ttl: int
     war_search_ttl: int
     war_details_ttl: int
+    sov_map_ttl: int
 
 
 @dataclass(frozen=True)
@@ -294,6 +296,11 @@ def load_config(
             "cache.esi_sov_fallback_ttl",
             minimum=1,
         ),
+        esi_sov_structures_fallback_ttl=_as_int(
+            cache_cfg.get("esi_sov_structures_fallback_ttl", 3600),
+            "cache.esi_sov_structures_fallback_ttl",
+            minimum=1,
+        ),
         rankings_ttl=_as_int(
             cache_cfg.get("rankings_ttl", 3600), "cache.rankings_ttl", minimum=1
         ),
@@ -330,6 +337,9 @@ def load_config(
         ),
         war_details_ttl=_as_int(
             cache_cfg.get("war_details_ttl", 21600), "cache.war_details_ttl", minimum=1
+        ),
+        sov_map_ttl=_as_int(
+            cache_cfg.get("sov_map_ttl", 3600), "cache.sov_map_ttl", minimum=1
         ),
     )
 

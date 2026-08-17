@@ -25,6 +25,19 @@ def ttl_from_expires(expires_header: str | None, fallback_seconds: int) -> int:
         return fallback_seconds
 
 
+def _reduce_sov_structures(data: list[dict]) -> dict[int, float]:
+    adm: dict[int, float] = {}
+    for item in data:
+        level = item.get("vulnerability_occupancy_level")
+        if level is None:
+            continue
+        sid = item["solar_system_id"]
+        level = float(level)
+        if sid not in adm or level > adm[sid]:
+            adm[sid] = level
+    return adm
+
+
 class EsiClient:
 
     def __init__(self):
@@ -167,6 +180,57 @@ class EsiClient:
         pm.esi_cache_hits.labels(entity="sov").inc()
         raw: dict[str, dict] = json.loads(cached)
         return {int(k): v for k, v in raw.items()}
+
+    async def _fetch_sov_structures(self) -> tuple[dict[int, float], str | None]:
+        session = await self._get_session()
+        _start = time.perf_counter()
+        try:
+            async with session.get(
+                f"{ESI_BASE}/sovereignty/structures/"
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                expires_header = resp.headers.get("Expires")
+        except aiohttp.ClientError as exc:
+            pm.esi_requests.labels(endpoint="sov_structures", outcome="error").inc()
+            pm.errors.labels(component="esi").inc()
+            raise RuntimeError(
+                f"ESI sovereignty/structures request failed: {exc!r}"
+            ) from exc
+        finally:
+            pm.esi_request_seconds.labels(endpoint="sov_structures").observe(
+                time.perf_counter() - _start
+            )
+        pm.esi_requests.labels(endpoint="sov_structures", outcome="ok").inc()
+        return _reduce_sov_structures(data), expires_header
+
+    async def refresh_sov_structures(self) -> int:
+        """Fetch ADM from ESI and store it in Redis. Returns the TTL used."""
+        adm, expires_header = await self._fetch_sov_structures()
+        ttl = ttl_from_expires(
+            expires_header,
+            fallback_seconds=config.cache.esi_sov_structures_fallback_ttl,
+        )
+        if self._redis is not None:
+            await self._redis.set(
+                "esi:sov_structures",
+                json.dumps({str(k): v for k, v in adm.items()}),
+                ex=ttl,
+            )
+        return ttl
+
+    async def get_sov_structures_cached(self) -> dict[int, float] | None:
+        """Read ADM from Redis only. None if absent (or no redis configured);
+        an empty dict means the feed was present but reported no ADM."""
+        if self._redis is None:
+            return None
+        cached = await self._redis.get("esi:sov_structures")
+        if cached is None:
+            pm.esi_cache_misses.labels(entity="sov_structures").inc()
+            return None
+        pm.esi_cache_hits.labels(entity="sov_structures").inc()
+        raw: dict[str, float] = json.loads(cached)
+        return {int(k): float(v) for k, v in raw.items()}
 
 
 esi_client = EsiClient()

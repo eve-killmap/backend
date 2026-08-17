@@ -52,6 +52,8 @@ cache:
   autocomplete_ttl: 60      # entity/ship/weapon autocomplete responses
   war_search_ttl: 60        # war search responses
   war_details_ttl: 21600    # /wars/details per-id cache (6h)
+  esi_sov_structures_fallback_ttl: 3600  # sov structures (ADM) when no Expires header (1h)
+  sov_map_ttl: 3600                      # /universe/sov response
 
 cache_redis:
   # Connection pool for the response/ESI cache Redis (REDIS_CACHE_URL). A blocking

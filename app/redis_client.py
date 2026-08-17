@@ -381,19 +381,32 @@ class KillBroadcaster:
         self._leader_task = None
         self._sov_task = None
 
+    async def _sov_refresh_once(self) -> int:
+        ttl = await esi_client.refresh_sov_map()  # propagates on failure
+        adm_ttl: int | None = None
+        degraded = False
+        try:
+            adm_ttl = await esi_client.refresh_sov_structures()
+        except Exception:
+            degraded = True
+            logger.warning(
+                "Sov structures refresh failed; ADM will fall back", exc_info=True
+            )
+        if self._redis is not None:
+            await self._redis.publish(
+                config.streaming.invalidate_channel,
+                json.dumps({"targets": ["sov", "sov_map"]}),
+            )
+        pm.sov_refreshes.labels(outcome="degraded" if degraded else "ok").inc()
+        logger.info("Sov map refreshed (ttl=%ss, adm_ttl=%s)", ttl, adm_ttl)
+        # Wake for whichever feed expires first, clamped to [60s, 1h].
+        return min(max(min(ttl, adm_ttl or ttl) - 60, 60), 3600)
+
     async def _sov_refresh_loop(self) -> None:
-        cap = 3600
         while True:
             try:
-                ttl = await esi_client.refresh_sov_map()
-                if self._redis is not None:
-                    await self._redis.publish(
-                        config.streaming.invalidate_channel,
-                        json.dumps({"targets": ["sov"]}),
-                    )
-                pm.sov_refreshes.labels(outcome="ok").inc()
-                logger.info("Sov map refreshed (ttl=%ss)", ttl)
-                await asyncio.sleep(min(max(ttl - 60, 60), cap))
+                sleep_s = await self._sov_refresh_once()
+                await asyncio.sleep(sleep_s)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
