@@ -5,20 +5,32 @@ from app.esi import EsiClient, _reduce_sov_structures, ttl_from_expires
 
 def test_reduce_skips_null_level():
     data = [
-        {"solar_system_id": 30000142, "vulnerability_occupancy_level": None,
-         "structure_type_id": 32458},
-        {"solar_system_id": 30000144, "vulnerability_occupancy_level": 3.0,
-         "structure_type_id": 32458},
+        {
+            "solar_system_id": 30000142,
+            "vulnerability_occupancy_level": None,
+            "structure_type_id": 32458,
+        },
+        {
+            "solar_system_id": 30000144,
+            "vulnerability_occupancy_level": 3.0,
+            "structure_type_id": 32458,
+        },
     ]
     assert _reduce_sov_structures(data) == {30000144: 3.0}
 
 
 def test_reduce_takes_max_regardless_of_order():
     fwd = [
-        {"solar_system_id": 1, "vulnerability_occupancy_level": 2.0,
-         "structure_type_id": 32458},
-        {"solar_system_id": 1, "vulnerability_occupancy_level": 5.0,
-         "structure_type_id": 32458},
+        {
+            "solar_system_id": 1,
+            "vulnerability_occupancy_level": 2.0,
+            "structure_type_id": 32458,
+        },
+        {
+            "solar_system_id": 1,
+            "vulnerability_occupancy_level": 5.0,
+            "structure_type_id": 32458,
+        },
     ]
     assert _reduce_sov_structures(fwd) == {1: 5.0}
     assert _reduce_sov_structures(list(reversed(fwd))) == {1: 5.0}
@@ -26,8 +38,13 @@ def test_reduce_takes_max_regardless_of_order():
 
 def test_reduce_does_not_filter_by_structure_type():
     # A non-IHub structure still contributes ADM (Verite filters only for ownership).
-    data = [{"solar_system_id": 7, "vulnerability_occupancy_level": 4.0,
-             "structure_type_id": 99999}]
+    data = [
+        {
+            "solar_system_id": 7,
+            "vulnerability_occupancy_level": 4.0,
+            "structure_type_id": 99999,
+        }
+    ]
     assert _reduce_sov_structures(data) == {7: 4.0}
 
 

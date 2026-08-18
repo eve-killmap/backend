@@ -35,7 +35,7 @@ def test_owner_table_deduped_and_indexed():
         30: _rec(corporation_id=98),
     }
     resp = build_sovereignty_response(sov_map, {}, {}, 1000)
-    assert resp.owner_ids == [99, 98]       # dedup, first-appearance in system order
+    assert resp.owner_ids == [99, 98]  # dedup, first-appearance in system order
     assert resp.owner_kinds == [0, 1]
     assert resp.system_ids == [10, 20, 30]
     assert resp.owner_idx == [0, 0, 1]

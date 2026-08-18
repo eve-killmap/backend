@@ -185,9 +185,7 @@ class EsiClient:
         session = await self._get_session()
         _start = time.perf_counter()
         try:
-            async with session.get(
-                f"{ESI_BASE}/sovereignty/structures/"
-            ) as resp:
+            async with session.get(f"{ESI_BASE}/sovereignty/structures/") as resp:
                 resp.raise_for_status()
                 data = await resp.json()
                 expires_header = resp.headers.get("Expires")

@@ -64,13 +64,18 @@ def test_adm_feed_absent_yields_adm_available_false(monkeypatch):
     resp = asyncio.run(uni.get_sovereignty_map(if_none_match=None))
     assert resp.status_code == 200
     assert b'"adm_available":false' in resp.body
-    assert resp.headers["Cache-Control"] == f"public, max-age={uni.config.cache.sov_map_ttl}"
+    assert (
+        resp.headers["Cache-Control"]
+        == f"public, max-age={uni.config.cache.sov_map_ttl}"
+    )
 
 
 def test_cache_hit_does_not_touch_esi(monkeypatch):
     qc = _FakeQueryCache()
     qc.store["sov_map"] = ('"deadbeef"', False, b'{"updated_at":1}')
-    _, esi = _patch(monkeypatch, sov_map={10: {"alliance_id": 99}}, adm={}, query_cache=qc)
+    _, esi = _patch(
+        monkeypatch, sov_map={10: {"alliance_id": 99}}, adm={}, query_cache=qc
+    )
     resp = asyncio.run(uni.get_sovereignty_map(if_none_match=None))
     assert resp.status_code == 200
     assert esi.map_calls == 0  # served from cache
@@ -118,4 +123,4 @@ def test_resolve_owner_names_db_then_esi_fallback(monkeypatch):
     sov_map = {10: {"alliance_id": 99}, 20: {"corporation_id": 98}}
     lookups = asyncio.run(uni._resolve_owner_names(sov_map))
     assert lookups[(0, 99)] == ("Goonswarm Federation", "CONDI")  # ESI fallback
-    assert lookups[(1, 98)] == ("Some Corp", "SCORP")             # from DB
+    assert lookups[(1, 98)] == ("Some Corp", "SCORP")  # from DB
