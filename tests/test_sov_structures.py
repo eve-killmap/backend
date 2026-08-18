@@ -16,7 +16,9 @@ def test_reduce_skips_null_level():
             "structure_type_id": 32458,
         },
     ]
-    assert _reduce_sov_structures(data) == {30000144: 3.0}
+    assert _reduce_sov_structures(data) == {
+        30000144: {"adm": 3.0, "start": None, "end": None}
+    }
 
 
 def test_reduce_takes_max_regardless_of_order():
@@ -32,8 +34,9 @@ def test_reduce_takes_max_regardless_of_order():
             "structure_type_id": 32458,
         },
     ]
-    assert _reduce_sov_structures(fwd) == {1: 5.0}
-    assert _reduce_sov_structures(list(reversed(fwd))) == {1: 5.0}
+    expected = {1: {"adm": 5.0, "start": None, "end": None}}
+    assert _reduce_sov_structures(fwd) == expected
+    assert _reduce_sov_structures(list(reversed(fwd))) == expected
 
 
 def test_reduce_does_not_filter_by_structure_type():
@@ -45,7 +48,35 @@ def test_reduce_does_not_filter_by_structure_type():
             "structure_type_id": 99999,
         }
     ]
-    assert _reduce_sov_structures(data) == {7: 4.0}
+    assert _reduce_sov_structures(data) == {7: {"adm": 4.0, "start": None, "end": None}}
+
+
+def test_reduce_captures_window_and_pairs_with_max_adm():
+    data = [
+        {
+            "solar_system_id": 30000208,
+            "vulnerability_occupancy_level": 2.0,
+            "vulnerable_start_time": "2026-01-01T00:00:00Z",
+            "vulnerable_end_time": "2026-01-01T03:00:00Z",
+        },
+        {
+            "solar_system_id": 30000208,
+            "vulnerability_occupancy_level": 6.0,
+            "vulnerable_start_time": "2026-08-19T09:30:00Z",
+            "vulnerable_end_time": "2026-08-19T12:30:00Z",
+        },
+    ]
+    from datetime import datetime, timezone
+
+    start = int(datetime(2026, 8, 19, 9, 30, tzinfo=timezone.utc).timestamp())
+    end = int(datetime(2026, 8, 19, 12, 30, tzinfo=timezone.utc).timestamp())
+    # The max-ADM structure wins, and its window travels with it — either order.
+    for feed in (data, list(reversed(data))):
+        assert _reduce_sov_structures(feed)[30000208] == {
+            "adm": 6.0,
+            "start": start,
+            "end": end,
+        }
 
 
 def test_ttl_from_expires_header_then_fallback():
@@ -116,8 +147,11 @@ def test_get_cached_parses_and_misses():
         async def get(self, k):
             return self._v
 
-    client._redis = _R('{"30000142": 6.0}')
-    assert asyncio.run(client.get_sov_structures_cached()) == {30000142: 6.0}
+    # get_sov_structures_cached is a passthrough; values are epoch ints post-conversion.
+    client._redis = _R('{"30000142": {"adm": 6.0, "start": 100, "end": 200}}')
+    assert asyncio.run(client.get_sov_structures_cached()) == {
+        30000142: {"adm": 6.0, "start": 100, "end": 200}
+    }
 
     client._redis = _R(None)  # key absent -> feed absent
     assert asyncio.run(client.get_sov_structures_cached()) is None

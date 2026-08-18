@@ -173,6 +173,8 @@ async def get_system_sov(
                             raise HTTPException(
                                 status_code=502, detail="Upstream service unavailable"
                             )
+                        adm_by_system = await esi_client.get_sov_structures_cached()
+                        rec = (adm_by_system or {}).get(solar_system_id)
                         result = SovResponse(
                             claimed=True,
                             # alliance_id/corporation_id are int when the corresponding info tuple is truthy;
@@ -195,6 +197,9 @@ async def get_system_sov(
                                 if corporation_info
                                 else None
                             ),
+                            adm=rec["adm"] if rec else None,
+                            vulnerable_start=rec["start"] if rec else None,
+                            vulnerable_end=rec["end"] if rec else None,
                         )
                 res = await query_cache.set(
                     "sov",

@@ -80,6 +80,75 @@ def test_sov_graceful_degradation_returns_200(monkeypatch):
     assert b"claimed" in resp.body
 
 
+def test_sov_claimed_includes_adm(monkeypatch):
+    from datetime import datetime, timezone
+
+    start = int(datetime(2026, 8, 19, 9, 30, tzinfo=timezone.utc).timestamp())
+    end = int(datetime(2026, 8, 19, 12, 30, tzinfo=timezone.utc).timestamp())
+
+    async def fake_get(prefix, params):
+        return None  # force a build
+
+    async def fake_set(prefix, params, value, ttl=None):
+        return '"e"', False, value.encode()
+
+    async def fake_map():
+        return {30000142: {"alliance_id": 99}}
+
+    async def fake_alliance(aid):
+        return ("Goonswarm", "CONDI")
+
+    async def fake_adm():
+        return {30000142: {"adm": 4.5, "start": start, "end": end}}
+
+    monkeypatch.setattr(systems.query_cache, "get", fake_get)
+    monkeypatch.setattr(systems.query_cache, "set", fake_set)
+    monkeypatch.setattr(systems.esi_client, "get_sov_map_cached", fake_map)
+    monkeypatch.setattr(systems.esi_client, "get_alliance_info", fake_alliance)
+    monkeypatch.setattr(systems.esi_client, "get_sov_structures_cached", fake_adm)
+
+    resp = asyncio.run(systems.get_system_sov(30000142, if_none_match=None))
+    assert resp.status_code == 200
+    import json as _json
+
+    body = _json.loads(resp.body)
+    assert body["adm"] == 4.5
+    assert body["vulnerable_start"] == start
+    assert body["vulnerable_end"] == end
+
+
+def test_sov_claimed_without_structures_omits_adm(monkeypatch):
+    import json as _json
+
+    async def fake_get(prefix, params):
+        return None
+
+    async def fake_set(prefix, params, value, ttl=None):
+        return '"e"', False, value.encode()
+
+    async def fake_map():
+        return {30000142: {"alliance_id": 99}}
+
+    async def fake_alliance(aid):
+        return ("Goonswarm", "CONDI")
+
+    async def fake_adm():
+        return {}  # feed present, this system reports nothing
+
+    monkeypatch.setattr(systems.query_cache, "get", fake_get)
+    monkeypatch.setattr(systems.query_cache, "set", fake_set)
+    monkeypatch.setattr(systems.esi_client, "get_sov_map_cached", fake_map)
+    monkeypatch.setattr(systems.esi_client, "get_alliance_info", fake_alliance)
+    monkeypatch.setattr(systems.esi_client, "get_sov_structures_cached", fake_adm)
+
+    resp = asyncio.run(systems.get_system_sov(30000142, if_none_match=None))
+    body = _json.loads(resp.body)
+    assert body["claimed"] is True
+    assert "adm" not in body  # exclude_none omits the missing values
+    assert "vulnerable_start" not in body
+    assert "vulnerable_end" not in body
+
+
 def test_rankings_serves_gzipped_when_large(monkeypatch):
     import gzip
 

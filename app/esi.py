@@ -8,6 +8,7 @@ import aiohttp
 import redis.asyncio as aioredis
 
 from app.config import config
+from app.timeparse import iso_to_epoch
 from app import prometheus_metrics as pm
 
 ESI_BASE = "https://esi.evetech.net/latest"
@@ -25,17 +26,22 @@ def ttl_from_expires(expires_header: str | None, fallback_seconds: int) -> int:
         return fallback_seconds
 
 
-def _reduce_sov_structures(data: list[dict]) -> dict[int, float]:
-    adm: dict[int, float] = {}
+def _reduce_sov_structures(data: list[dict]) -> dict[int, dict]:
+    out: dict[int, dict] = {}
     for item in data:
         level = item.get("vulnerability_occupancy_level")
         if level is None:
             continue
         sid = item["solar_system_id"]
         level = float(level)
-        if sid not in adm or level > adm[sid]:
-            adm[sid] = level
-    return adm
+        existing = out.get(sid)
+        if existing is None or level > existing["adm"]:
+            out[sid] = {
+                "adm": level,
+                "start": iso_to_epoch(item.get("vulnerable_start_time")),
+                "end": iso_to_epoch(item.get("vulnerable_end_time")),
+            }
+    return out
 
 
 class EsiClient:
@@ -181,7 +187,7 @@ class EsiClient:
         raw: dict[str, dict] = json.loads(cached)
         return {int(k): v for k, v in raw.items()}
 
-    async def _fetch_sov_structures(self) -> tuple[dict[int, float], str | None]:
+    async def _fetch_sov_structures(self) -> tuple[dict[int, dict], str | None]:
         session = await self._get_session()
         _start = time.perf_counter()
         try:
@@ -203,8 +209,8 @@ class EsiClient:
         return _reduce_sov_structures(data), expires_header
 
     async def refresh_sov_structures(self) -> int:
-        """Fetch ADM from ESI and store it in Redis. Returns the TTL used."""
-        adm, expires_header = await self._fetch_sov_structures()
+        """Fetch ADM + vulnerability windows from ESI, store in Redis. Returns the TTL."""
+        records, expires_header = await self._fetch_sov_structures()
         ttl = ttl_from_expires(
             expires_header,
             fallback_seconds=config.cache.esi_sov_structures_fallback_ttl,
@@ -212,14 +218,16 @@ class EsiClient:
         if self._redis is not None:
             await self._redis.set(
                 "esi:sov_structures",
-                json.dumps({str(k): v for k, v in adm.items()}),
+                json.dumps({str(k): v for k, v in records.items()}),
                 ex=ttl,
             )
         return ttl
 
-    async def get_sov_structures_cached(self) -> dict[int, float] | None:
-        """Read ADM from Redis only. None if absent (or no redis configured);
-        an empty dict means the feed was present but reported no ADM."""
+    async def get_sov_structures_cached(self) -> dict[int, dict] | None:
+        """Read ADM + vulnerability windows from Redis only. None if absent (or no
+        redis configured); an empty dict means the feed was present but reported
+        nothing. Each value is ``{"adm": float, "start": iso|None, "end": iso|None}``.
+        """
         if self._redis is None:
             return None
         cached = await self._redis.get("esi:sov_structures")
@@ -227,8 +235,8 @@ class EsiClient:
             pm.esi_cache_misses.labels(entity="sov_structures").inc()
             return None
         pm.esi_cache_hits.labels(entity="sov_structures").inc()
-        raw: dict[str, float] = json.loads(cached)
-        return {int(k): float(v) for k, v in raw.items()}
+        raw: dict[str, dict] = json.loads(cached)
+        return {int(k): v for k, v in raw.items()}
 
 
 esi_client = EsiClient()

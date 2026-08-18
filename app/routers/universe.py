@@ -230,7 +230,12 @@ async def get_sovereignty_map(
                     raise HTTPException(
                         status_code=503, detail="Sovereignty data warming up"
                     )
-                adm_by_system = await esi_client.get_sov_structures_cached()
+                adm_records = await esi_client.get_sov_structures_cached()
+                adm_by_system = (
+                    {sid: rec["adm"] for sid, rec in adm_records.items()}
+                    if adm_records is not None
+                    else None
+                )
                 name_lookups = await _resolve_owner_names(sov_map)
                 result = build_sovereignty_response(
                     sov_map, adm_by_system, name_lookups, int(time.time())

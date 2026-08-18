@@ -124,3 +124,16 @@ def test_resolve_owner_names_db_then_esi_fallback(monkeypatch):
     lookups = asyncio.run(uni._resolve_owner_names(sov_map))
     assert lookups[(0, 99)] == ("Goonswarm Federation", "CONDI")  # ESI fallback
     assert lookups[(1, 98)] == ("Some Corp", "SCORP")  # from DB
+
+
+def test_bulk_extracts_adm_from_structure_records(monkeypatch):
+    # get_sov_structures_cached now returns records; the endpoint must unpack the
+    # adm float for build_sovereignty_response, and must NOT leak the window.
+    records = {
+        10: {"adm": 6.0, "start": "2026-08-19T09:30:00Z", "end": "2026-08-19T12:30:00Z"}
+    }
+    _patch(monkeypatch, sov_map={10: {"alliance_id": 99}}, adm=records)
+    resp = asyncio.run(uni.get_sovereignty_map(if_none_match=None))
+    assert resp.status_code == 200
+    assert b'"adm":[6.0]' in resp.body  # record's adm unpacked into the columnar array
+    assert b"vulnerable" not in resp.body  # window is per-system only

@@ -152,6 +152,9 @@ class SovResponse(BaseModel):
     claimed: bool
     alliance: GroupInfo | None = None
     corporation: GroupInfo | None = None
+    adm: float | None = None
+    vulnerable_start: int | None = None
+    vulnerable_end: int | None = None
 
 
 class SovereigntyMapResponse(BaseModel):
