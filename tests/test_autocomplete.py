@@ -31,6 +31,15 @@ def test_autocomplete_entities_escapes_like_wildcards(monkeypatch):
     assert fake.args[0] == r"50\%\_x"  # % and _ escaped
 
 
+def test_autocomplete_entities_matches_space_insensitively(monkeypatch):
+    fake = _FakeDb([])
+    monkeypatch.setattr(ac, "db", fake)
+    asyncio.run(ac.autocomplete_entities("alliance", "CCP", 20))
+    assert "replace(name, ' ', '')" in fake.query
+    assert "replace(ticker, ' ', '')" in fake.query
+    assert "replace($1, ' ', '')" in fake.query
+
+
 def test_autocomplete_types_uses_icon(monkeypatch):
     fake = _FakeDb([{"id": 2929, "name": "Large Energy Neutralizer"}])
     monkeypatch.setattr(ac, "db", fake)

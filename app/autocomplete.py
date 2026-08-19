@@ -5,21 +5,25 @@ from app.models import EntityCandidate, TypeCandidate
 _ENTITY_SQL = {
     "character": (
         "SELECT character_id AS id, name, NULL::text AS ticker FROM characters "
-        "WHERE name ILIKE '%'||$1||'%' ESCAPE '\\' ORDER BY name LIMIT $2"
+        "WHERE replace(name, ' ', '') ILIKE '%'||replace($1, ' ', '')||'%' ESCAPE '\\' "
+        "ORDER BY name LIMIT $2"
     ),
     "corporation": (
         "SELECT corporation_id AS id, name, ticker FROM corporations "
-        "WHERE name ILIKE '%'||$1||'%' ESCAPE '\\' OR ticker ILIKE '%'||$1||'%' ESCAPE '\\' "
+        "WHERE replace(name, ' ', '') ILIKE '%'||replace($1, ' ', '')||'%' ESCAPE '\\' "
+        "OR replace(ticker, ' ', '') ILIKE '%'||replace($1, ' ', '')||'%' ESCAPE '\\' "
         "ORDER BY name LIMIT $2"
     ),
     "alliance": (
         "SELECT alliance_id AS id, name, ticker FROM alliances "
-        "WHERE name ILIKE '%'||$1||'%' ESCAPE '\\' OR ticker ILIKE '%'||$1||'%' ESCAPE '\\' "
+        "WHERE replace(name, ' ', '') ILIKE '%'||replace($1, ' ', '')||'%' ESCAPE '\\' "
+        "OR replace(ticker, ' ', '') ILIKE '%'||replace($1, ' ', '')||'%' ESCAPE '\\' "
         "ORDER BY name LIMIT $2"
     ),
     "faction": (
         "SELECT faction_id AS id, name, NULL::text AS ticker FROM factions "
-        "WHERE name ILIKE '%'||$1||'%' ESCAPE '\\' ORDER BY name LIMIT $2"
+        "WHERE replace(name, ' ', '') ILIKE '%'||replace($1, ' ', '')||'%' ESCAPE '\\' "
+        "ORDER BY name LIMIT $2"
     ),
 }
 
