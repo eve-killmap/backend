@@ -17,7 +17,7 @@ from app.config import config
 from app.metrics import metrics
 from app import prometheus_metrics as pm
 from app import entities
-from app.esi import esi_client
+from app.esi import esi_client, EsiTransientError
 from app.queries import get_type_names
 from app.timeparse import iso_to_epoch
 from app.positions import sanitize_position
@@ -393,6 +393,9 @@ class KillBroadcaster:
         degraded = False
         try:
             adm_ttl = await esi_client.refresh_sov_structures()
+        except EsiTransientError as exc:
+            degraded = True
+            logger.info("Sov structures refresh skipped: %s; ADM serving last-known", exc)
         except Exception:
             degraded = True
             logger.warning(

@@ -14,6 +14,24 @@ from app import prometheus_metrics as pm
 ESI_BASE = "https://esi.evetech.net/latest"
 
 
+class EsiTransientError(RuntimeError):
+    """ESI was transiently unavailable (5xx / connection / timeout) -- e.g. during
+    EVE's daily downtime. A RuntimeError subclass so existing handlers still catch
+    it, while callers can special-case it as an expected, self-healing condition."""
+
+
+def _is_transient_esi_error(exc: BaseException) -> bool:
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return exc.status >= 500
+    return isinstance(exc, aiohttp.ClientConnectionError)
+
+
+def _esi_error_brief(exc: BaseException) -> str:
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return f"{exc.status} {exc.message}"
+    return type(exc).__name__
+
+
 def ttl_from_expires(expires_header: str | None, fallback_seconds: int) -> int:
     if not expires_header:
         return fallback_seconds
@@ -152,6 +170,10 @@ class EsiClient:
         except aiohttp.ClientError as exc:
             pm.esi_requests.labels(endpoint="sov", outcome="error").inc()
             pm.errors.labels(component="esi").inc()
+            if _is_transient_esi_error(exc):
+                raise EsiTransientError(
+                    f"ESI sovereignty/map transiently unavailable: {_esi_error_brief(exc)}"
+                ) from exc
             raise RuntimeError(f"ESI sovereignty/map request failed: {exc!r}") from exc
         finally:
             pm.esi_request_seconds.labels(endpoint="sov").observe(
@@ -198,6 +220,11 @@ class EsiClient:
         except aiohttp.ClientError as exc:
             pm.esi_requests.labels(endpoint="sov_structures", outcome="error").inc()
             pm.errors.labels(component="esi").inc()
+            if _is_transient_esi_error(exc):
+                raise EsiTransientError(
+                    f"ESI sovereignty/structures transiently unavailable: "
+                    f"{_esi_error_brief(exc)}"
+                ) from exc
             raise RuntimeError(
                 f"ESI sovereignty/structures request failed: {exc!r}"
             ) from exc

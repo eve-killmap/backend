@@ -1,6 +1,84 @@
 import asyncio
 
-from app.esi import EsiClient, _reduce_sov_structures, ttl_from_expires
+import aiohttp
+import pytest
+
+from app.esi import (
+    EsiClient,
+    EsiTransientError,
+    _is_transient_esi_error,
+    _reduce_sov_structures,
+    ttl_from_expires,
+)
+
+
+def test_is_transient_esi_error_classification():
+    # 5xx (EVE downtime returns 502) and connection drops are transient/self-healing.
+    assert _is_transient_esi_error(
+        aiohttp.ClientResponseError(None, (), status=502, message="Bad Gateway")
+    )
+    assert _is_transient_esi_error(
+        aiohttp.ClientResponseError(None, (), status=503, message="Service Unavailable")
+    )
+    assert _is_transient_esi_error(aiohttp.ClientConnectionError())
+    assert _is_transient_esi_error(aiohttp.ServerTimeoutError())
+    # 4xx means a genuinely bad request from us -- not transient.
+    assert not _is_transient_esi_error(
+        aiohttp.ClientResponseError(None, (), status=404, message="Not Found")
+    )
+    assert not _is_transient_esi_error(
+        aiohttp.ClientResponseError(None, (), status=400, message="Bad Request")
+    )
+
+
+class _FakeResp:
+    def __init__(self, exc):
+        self._exc = exc
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def raise_for_status(self):
+        raise self._exc
+
+    async def json(self):
+        return []
+
+    @property
+    def headers(self):
+        return {}
+
+
+class _FakeSession:
+    closed = False
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    def get(self, url):
+        return _FakeResp(self._exc)
+
+
+def test_fetch_structures_raises_transient_on_5xx():
+    client = EsiClient()
+    client._session = _FakeSession(
+        aiohttp.ClientResponseError(None, (), status=502, message="Bad Gateway")
+    )
+    with pytest.raises(EsiTransientError):
+        asyncio.run(client._fetch_sov_structures())
+
+
+def test_fetch_structures_raises_plain_runtimeerror_on_4xx():
+    client = EsiClient()
+    client._session = _FakeSession(
+        aiohttp.ClientResponseError(None, (), status=404, message="Not Found")
+    )
+    with pytest.raises(RuntimeError) as e:
+        asyncio.run(client._fetch_sov_structures())
+    assert not isinstance(e.value, EsiTransientError)  # a real fault, stays loud
 
 
 def test_reduce_skips_null_level():
