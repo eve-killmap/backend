@@ -15,13 +15,72 @@ class _FakeDb:
 
 
 def test_autocomplete_entities_builds_candidates(monkeypatch):
-    rows = [{"id": 99005338, "name": "Goonswarm", "ticker": "CONDI"}]
+    rows = [
+        {
+            "id": 99005338,
+            "name": "Goonswarm",
+            "ticker": "CONDI",
+            "member_count": 32000,
+            "date_founded": None,
+        }
+    ]
     fake = _FakeDb(rows)
     monkeypatch.setattr(ac, "db", fake)
     out = asyncio.run(ac.autocomplete_entities("alliance", "goon", 20))
     assert out[0].id == 99005338 and out[0].ticker == "CONDI"
+    assert out[0].member_count == 32000
     assert out[0].image_url.endswith("/alliances/99005338/logo?size=32")
     assert "ILIKE" in fake.query and "ticker" in fake.query
+
+
+def test_autocomplete_corporation_query_selects_metadata_and_ranks(monkeypatch):
+    fake = _FakeDb([])
+    monkeypatch.setattr(ac, "db", fake)
+    asyncio.run(ac.autocomplete_entities("corporation", "goon", 20))
+    assert "member_count" in fake.query and "date_founded" in fake.query
+    # corp member_count is raw-nullable (NULL = not yet fetched from ESI); no COALESCE
+    assert "member_count DESC NULLS LAST" in fake.query
+    assert "coalesce" not in fake.query.lower()
+
+
+def test_autocomplete_alliance_query_joins_member_count_and_ranks(monkeypatch):
+    fake = _FakeDb([])
+    monkeypatch.setattr(ac, "db", fake)
+    asyncio.run(ac.autocomplete_entities("alliance", "goon", 20))
+    # alliance member count comes from the mv; absent row COALESCEs to 0 (genuinely closed)
+    assert "mv_alliance_member_count" in fake.query
+    assert "coalesce" in fake.query.lower()
+    assert "date_founded" in fake.query
+    assert "member_count DESC NULLS LAST" in fake.query
+
+
+def test_autocomplete_corporation_returns_metadata(monkeypatch):
+    from datetime import datetime, timezone
+
+    dt = datetime(2010, 6, 1, tzinfo=timezone.utc)
+    rows = [
+        {"id": 1, "name": "X Corp", "ticker": "XC", "member_count": 12, "date_founded": dt}
+    ]
+    fake = _FakeDb(rows)
+    monkeypatch.setattr(ac, "db", fake)
+    out = asyncio.run(ac.autocomplete_entities("corporation", "x c", 20))
+    assert out[0].member_count == 12
+    # date_founded is emitted as a Unix epoch int, like the rest of the API
+    assert out[0].date_founded == int(dt.timestamp())
+
+
+def test_autocomplete_character_returns_null_metadata(monkeypatch):
+    # Characters have neither metric; the query returns the columns as NULL and
+    # still orders by name (no member_count ranking).
+    rows = [
+        {"id": 5, "name": "Pilot", "ticker": None, "member_count": None, "date_founded": None}
+    ]
+    fake = _FakeDb(rows)
+    monkeypatch.setattr(ac, "db", fake)
+    out = asyncio.run(ac.autocomplete_entities("character", "pil", 20))
+    assert out[0].member_count is None and out[0].date_founded is None
+    assert "member_count DESC" not in fake.query  # characters are not ranked by size
+    assert "ORDER BY name" in fake.query
 
 
 def test_autocomplete_entities_escapes_like_wildcards(monkeypatch):
@@ -67,6 +126,22 @@ def test_entities_endpoint_short_circuits_below_min_length(monkeypatch):
         )
     )
     assert out == [] and called["n"] == 0  # no DB hit
+
+
+def test_entities_endpoint_default_limit_is_20(monkeypatch):
+    captured = {}
+
+    async def fake(kind, q, limit):
+        captured["limit"] = limit
+        return []
+
+    monkeypatch.setattr(acr, "autocomplete_entities", fake)
+    asyncio.run(
+        acr.autocomplete_entities_endpoint(
+            kind="alliance", q="goon", response=Response()
+        )
+    )
+    assert captured["limit"] == 20  # callers pass an explicit limit when they want more
 
 
 def test_entities_endpoint_sets_cache_control(monkeypatch):

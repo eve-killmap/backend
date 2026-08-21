@@ -190,6 +190,8 @@ class EntityCandidate(BaseModel):
     name: str
     ticker: str | None = None
     image_url: str
+    member_count: int | None = None
+    date_founded: int | None = None
 
 
 class TypeCandidate(BaseModel):

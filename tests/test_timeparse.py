@@ -1,10 +1,19 @@
 from datetime import datetime, timezone
 
-from app.timeparse import iso_to_epoch
+from app.timeparse import iso_to_epoch, datetime_to_epoch
 
 
 def test_none_passes_through():
     assert iso_to_epoch(None) is None
+
+
+def test_datetime_to_epoch_none_passes_through():
+    assert datetime_to_epoch(None) is None
+
+
+def test_datetime_to_epoch_converts_aware_datetime():
+    dt = datetime(2026, 6, 28, 18, 51, 9, tzinfo=timezone.utc)
+    assert datetime_to_epoch(dt) == int(dt.timestamp())
 
 
 def test_epoch_zero():
