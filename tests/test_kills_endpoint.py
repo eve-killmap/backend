@@ -173,3 +173,31 @@ def test_encode_maybe_offload_inline_for_small(monkeypatch):
     out = asyncio.run(systems._encode_maybe_offload(result, 2000))
     assert calls["n"] == 0  # below threshold → inline, no thread hop
     assert out == _expected(result)
+
+
+def test_encode_maybe_offload_zeroes_out_of_range_positions(monkeypatch):
+    # An abyssal-deadspace kill at ~1e32 overflows np.int64 in the encoder (the
+    # reported HTTP 500). Its position must collapse to the (0,0,0) no-position
+    # sentinel — the whole triple, since one bad axis makes the point unplottable —
+    # while a normal neighbouring row is untouched.
+    async def rec(fn, *a):
+        return fn(*a)
+
+    monkeypatch.setattr(systems.asyncio, "to_thread", rec)
+    n = 100  # >= _NUMPY_MIN_ROWS -> exercises the numpy path that crashed
+    result = _columns(list(range(n)))
+    result["x"] = [10**32, 111] + [0] * (n - 2)
+    result["y"] = [5, 222] + [0] * (n - 2)  # in range, but shares the bad triple
+    result["z"] = [0, 333] + [0] * (n - 2)
+
+    out = asyncio.run(systems._encode_maybe_offload(result, 2000))  # must not raise
+
+    expected = encode_kills_binary(
+        result["killmail_ids"],
+        result["killmail_times"],
+        [0, 111] + [0] * (n - 2),  # bad triple zeroed, normal row kept
+        [0, 222] + [0] * (n - 2),
+        [0, 333] + [0] * (n - 2),
+        result["ship_types"],
+    )
+    assert out == expected

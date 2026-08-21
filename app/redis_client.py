@@ -20,6 +20,7 @@ from app import entities
 from app.esi import esi_client
 from app.queries import get_type_names
 from app.timeparse import iso_to_epoch
+from app.positions import sanitize_position
 
 logger = logging.getLogger(__name__)
 
@@ -190,13 +191,18 @@ def _facet_ids(kill: dict) -> dict:
 
 
 async def _parse_kill(kill: dict) -> dict:
+    # Out-of-range positions (abyssal deadspace, ~1e36) collapse to the (0,0,0)
+    # "no position" sentinel, matching the REST binary path.
+    x, y, z = sanitize_position(
+        kill["position_x"], kill["position_y"], kill["position_z"]
+    )
     payload = {
         "killmail_id": kill["killmail_id"],
         "killmail_time": iso_to_epoch(kill["killmail_time"]),
         "solar_system_id": kill["solar_system_id"],
-        "x": int(kill["position_x"]),
-        "y": int(kill["position_y"]),
-        "z": int(kill["position_z"]),
+        "x": x,
+        "y": y,
+        "z": z,
         "v_ship_type_id": kill["victim_ship_type_id"],
     }
     payload.update(await _enrich_kill(kill))

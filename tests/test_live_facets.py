@@ -1,5 +1,42 @@
+import asyncio
+
 import app.redis_client as rc
 from app.redis_client import broadcaster
+
+
+def _kill(px, py, pz):
+    return {
+        "killmail_id": 1,
+        "killmail_time": "2019-04-03T06:40:07Z",
+        "solar_system_id": 32000089,
+        "position_x": px,
+        "position_y": py,
+        "position_z": pz,
+        "victim_ship_type_id": 17715,
+        "attackers": [],
+    }
+
+
+def test_parse_kill_zeroes_out_of_range_position(monkeypatch):
+    # Live-feed counterpart of the REST fix: an abyssal position (~1e32) is sent
+    # to WS subscribers as the (0,0,0) no-position sentinel, not a garbage int.
+    async def fake_enrich(_kill):
+        return {}
+
+    monkeypatch.setattr(rc, "_enrich_kill", fake_enrich)
+    out = asyncio.run(
+        rc._parse_kill(_kill(1.4048816610602347e32, 6.919427609529127e31, 1.4049075104032597e32))
+    )
+    assert (out["x"], out["y"], out["z"]) == (0, 0, 0)
+
+
+def test_parse_kill_keeps_in_range_position(monkeypatch):
+    async def fake_enrich(_kill):
+        return {}
+
+    monkeypatch.setattr(rc, "_enrich_kill", fake_enrich)
+    out = asyncio.run(rc._parse_kill(_kill(-4.5e12, 1.0e11, 0.0)))
+    assert (out["x"], out["y"], out["z"]) == (-4_500_000_000_000, 100_000_000_000, 0)
 
 
 def test_facet_ids_dedup_and_null_strip():

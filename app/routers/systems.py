@@ -16,6 +16,7 @@ from app.cache import (
 )
 from app.http_cache import json_cache_response, binary_cache_response
 from app.binary_encoder import encode_kills_binary
+from app.positions import sanitize_position
 from app.esi import esi_client
 from app import prometheus_metrics
 from app.queries import fetch_raw_kills, fetch_farthest_kill, normalize_farthest_kill
@@ -34,12 +35,23 @@ async def _encode_maybe_offload(result, threshold: int) -> bytes:
     loop. Below the threshold the thread hop isn't worth it, so encode inline.
     numpy releases the GIL, so the offloaded encode genuinely progresses while
     the loop serves other requests."""
+    # Sanitize positions per-row: coordinates beyond the client's safe-integer
+    # domain (e.g. abyssal-deadspace kills at ~1e36) would overflow the int64
+    # encoder, so the whole triple collapses to the (0,0,0) "no position" sentinel.
+    xs: list[int] = []
+    ys: list[int] = []
+    zs: list[int] = []
+    for xv, yv, zv in zip(result["x"], result["y"], result["z"]):
+        sx, sy, sz = sanitize_position(xv, yv, zv)
+        xs.append(sx)
+        ys.append(sy)
+        zs.append(sz)
     args = (
         result["killmail_ids"],
         result["killmail_times"],
-        [int(v) for v in result["x"]],
-        [int(v) for v in result["y"]],
-        [int(v) for v in result["z"]],
+        xs,
+        ys,
+        zs,
         result["ship_types"],
     )
     if len(result["killmail_ids"]) >= threshold:
