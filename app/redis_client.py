@@ -54,6 +54,7 @@ _GLOBAL_FIELDS = frozenset(
         "fb_ship_name",
         "fb_corporation_id",
         "fb_corporation_name",
+        "fb_alliance_id",
         "fb_alliance_name",
         "v_alliance_id",
         "v_faction_id",
