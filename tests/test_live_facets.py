@@ -111,3 +111,45 @@ def test_new_fields_reach_global_and_system_subscribers():
     ):
         assert field in g, field
         assert field in s, field
+
+
+def test_fanout_omits_none_fields_but_keeps_empty_lists():
+    # WS payloads drop null fields entirely (exclude_none parity with REST), but an
+    # empty list is not None, so the always-present a_* arrays are kept as [].
+    payload = {
+        "solar_system_id": 30000142,
+        "killmail_id": 5,
+        "killmail_time": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "v_ship_type_id": 670,
+        "total_value": 12.5,  # present -> kept
+        "war_id": None,  # None -> omitted
+        "fitted_value": None,  # None -> omitted
+        "v_alliance_id": None,  # None -> omitted
+        "fb_alliance_name": None,  # None -> omitted
+        "a_character_ids": [],  # empty list, not None -> kept
+        "a_ship_type_ids": [670],
+    }
+    gq = broadcaster.subscribe_global()
+    sq = broadcaster.subscribe_system(30000142)
+    try:
+        broadcaster._fanout(payload)
+        g = gq.get_nowait()
+        s = sq.get_nowait()
+    finally:
+        broadcaster.unsubscribe_global(gq)
+        broadcaster.unsubscribe_system(30000142, sq)
+    for feed in (g, s):
+        assert "war_id" not in feed
+        assert "fitted_value" not in feed
+        assert "v_alliance_id" not in feed
+        assert "fb_alliance_name" not in feed
+        assert feed["total_value"] == 12.5  # non-None kept
+        assert feed["a_character_ids"] == []  # empty list survives (not None)
+        assert feed["a_ship_type_ids"] == [670]
+    # never-null, feed-specific fields are still present
+    assert g["solar_system_id"] == 30000142
+    assert "solar_system_id" not in s  # stripped from the system feed
+    assert (s["x"], s["y"], s["z"]) == (0, 0, 0)

@@ -472,8 +472,16 @@ class KillBroadcaster:
 
     def _fanout(self, payload: dict) -> None:
         system_id: int = payload["solar_system_id"]
-        global_payload = {k: v for k, v in payload.items() if k in _GLOBAL_FIELDS}
-        system_payload = {k: v for k, v in payload.items() if k in _SYSTEM_FIELDS}
+        global_payload = {
+            k: v
+            for k, v in payload.items()
+            if k in _GLOBAL_FIELDS and v is not None
+        }
+        system_payload = {
+            k: v
+            for k, v in payload.items()
+            if k in _SYSTEM_FIELDS and v is not None
+        }
 
         dead: set[asyncio.Queue] = set()
         for q in self._global_subs:
