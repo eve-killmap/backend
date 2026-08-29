@@ -42,7 +42,7 @@ async def get_kill_details(
     if error is not None:
         raise HTTPException(status_code=400, detail=error)
     result = await get_kill_details_cached(ids_list)
-    json_bytes = result.model_dump_json().encode("utf-8")
+    json_bytes = result.model_dump_json(exclude_none=True).encode("utf-8")
     return json_cache_response(
         json_bytes,
         gzipped=False,
@@ -271,6 +271,15 @@ async def get_kill_details_processed(
                     war_info=war_info,
                     final_blow_is_top_damage=final_blow_is_top_damage,
                     attackers=len(attackers),
+                    fitted_value=kill.fitted_value,
+                    dropped_value=kill.dropped_value,
+                    destroyed_value=kill.destroyed_value,
+                    total_value=kill.total_value,
+                    total_droppable_value=kill.total_droppable_value,
+                    npc=kill.npc,
+                    solo=kill.solo,
+                    awox=kill.awox,
+                    labels=kill.labels,
                 )
 
                 res = await query_cache.set(

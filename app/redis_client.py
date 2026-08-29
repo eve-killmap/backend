@@ -65,6 +65,15 @@ _GLOBAL_FIELDS = frozenset(
         "a_faction_ids",
         "a_ship_type_ids",
         "a_weapon_type_ids",
+        "fitted_value",
+        "dropped_value",
+        "destroyed_value",
+        "total_value",
+        "total_droppable_value",
+        "npc",
+        "solo",
+        "awox",
+        "labels",
     }
 )
 
@@ -205,6 +214,15 @@ async def _parse_kill(kill: dict) -> dict:
         "y": y,
         "z": z,
         "v_ship_type_id": kill["victim_ship_type_id"],
+        "fitted_value": kill.get("fitted_value"),
+        "dropped_value": kill.get("dropped_value"),
+        "destroyed_value": kill.get("destroyed_value"),
+        "total_value": kill.get("total_value"),
+        "total_droppable_value": kill.get("total_droppable_value"),
+        "npc": kill.get("npc"),
+        "solo": kill.get("solo"),
+        "awox": kill.get("awox"),
+        "labels": kill.get("labels"),
     }
     payload.update(await _enrich_kill(kill))
     payload.update(_facet_ids(kill))

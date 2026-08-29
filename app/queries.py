@@ -54,8 +54,18 @@ async def fetch_kills_by_ids(killmail_ids: list[int]) -> RawKillDetailResponse:
             k.victim_damage_taken,
             k.victim_ship_type_id,
             k.war_id,
-            k.inserted_time
+            k.inserted_time,
+            z.fitted_value,
+            z.dropped_value,
+            z.destroyed_value,
+            z.total_value,
+            z.total_droppable_value,
+            z.npc,
+            z.solo,
+            z.awox,
+            z.labels
         FROM kills k
+        LEFT JOIN zkb_metadata z ON z.killmail_id = k.killmail_id
         WHERE k.killmail_id = ANY($1)
     """
     kill_rows = await db.fetch(query, killmail_ids)
@@ -116,6 +126,15 @@ async def fetch_kills_by_ids(killmail_ids: list[int]) -> RawKillDetailResponse:
             ),
             attackers=attackers_by_kill.get(row["killmail_id"], []),
             inserted_time=row["inserted_time"],
+            fitted_value=row["fitted_value"],
+            dropped_value=row["dropped_value"],
+            destroyed_value=row["destroyed_value"],
+            total_value=row["total_value"],
+            total_droppable_value=row["total_droppable_value"],
+            npc=row["npc"],
+            solo=row["solo"],
+            awox=row["awox"],
+            labels=row["labels"],
         )
         for row in kill_rows
     ]

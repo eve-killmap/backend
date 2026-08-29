@@ -31,6 +31,15 @@ class KillDetail(BaseModel):
     victim: Victim
     attackers: list[Attacker]
     inserted_time: datetime
+    fitted_value: float | None = None
+    dropped_value: float | None = None
+    destroyed_value: float | None = None
+    total_value: float | None = None
+    total_droppable_value: float | None = None
+    npc: bool | None = None
+    solo: bool | None = None
+    awox: bool | None = None
+    labels: list[str] | None = None
 
 
 class RawKillDetailResponse(BaseModel):
@@ -102,6 +111,15 @@ class ProcessedKillDetailResponse(BaseModel):
     war_info: WarProcessed | None = None
     final_blow_is_top_damage: bool
     attackers: int
+    fitted_value: float | None = None
+    dropped_value: float | None = None
+    destroyed_value: float | None = None
+    total_value: float | None = None
+    total_droppable_value: float | None = None
+    npc: bool | None = None
+    solo: bool | None = None
+    awox: bool | None = None
+    labels: list[str] | None = None
 
 
 class RankSystem(BaseModel):
