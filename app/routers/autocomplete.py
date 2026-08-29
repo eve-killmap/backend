@@ -7,6 +7,7 @@ from app.config import config
 from app.autocomplete import (
     autocomplete_entities,
     autocomplete_types,
+    autocomplete_ships,
     autocomplete_weapons,
 )
 from app.models import EntityCandidate, TypeCandidate
@@ -56,6 +57,22 @@ async def autocomplete_types_endpoint(
         return []
     pm.autocomplete_requests.labels(kind="type", outcome="served").inc()
     return await autocomplete_types(q.strip(), limit)
+
+
+@router.get("/autocomplete/ships", response_model=list[TypeCandidate])
+async def autocomplete_ships_endpoint(
+    q: Annotated[str, Query(min_length=0)],
+    response: Response,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+):
+    response.headers["Cache-Control"] = (
+        f"public, max-age={config.cache.autocomplete_ttl}"
+    )
+    if len(q.strip()) < config.limits.autocomplete_min_length:
+        pm.autocomplete_requests.labels(kind="ship", outcome="short_circuit").inc()
+        return []
+    pm.autocomplete_requests.labels(kind="ship", outcome="served").inc()
+    return await autocomplete_ships(q.strip(), limit)
 
 
 @router.get("/autocomplete/weapons", response_model=list[TypeCandidate])

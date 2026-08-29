@@ -232,6 +232,16 @@ def test_autocomplete_weapons_uses_mv(monkeypatch):
     assert "published" not in fake.query
 
 
+def test_autocomplete_ships_uses_mv(monkeypatch):
+    fake = _FakeDb([{"id": 670, "name": "Capsule"}])
+    monkeypatch.setattr(ac, "db", fake)
+    out = asyncio.run(ac.autocomplete_ships("caps", 20))
+    assert out[0].id == 670
+    assert out[0].image_url.endswith("/types/670/icon?size=32")
+    assert "mv_ship_search" in fake.query
+    assert "published" not in fake.query
+
+
 def test_weapons_endpoint_metric(monkeypatch):
     from app.models import TypeCandidate
     from fastapi import Response

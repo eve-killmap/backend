@@ -69,6 +69,19 @@ async def autocomplete_types(q: str, limit: int) -> list[TypeCandidate]:
     ]
 
 
+async def autocomplete_ships(q: str, limit: int) -> list[TypeCandidate]:
+    rows = await db.fetch(
+        "SELECT type_id AS id, name FROM mv_ship_search "
+        "WHERE name ILIKE '%'||$1||'%' ESCAPE '\\' ORDER BY name LIMIT $2",
+        _escape_like(q),
+        limit,
+    )
+    return [
+        TypeCandidate(id=r["id"], name=r["name"], image_url=image_url("type", r["id"]))
+        for r in rows
+    ]
+
+
 async def autocomplete_weapons(q: str, limit: int) -> list[TypeCandidate]:
     rows = await db.fetch(
         "SELECT type_id AS id, name FROM mv_weapon_search "
