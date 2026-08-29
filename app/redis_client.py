@@ -42,22 +42,25 @@ _GLOBAL_FIELDS = frozenset(
         "killmail_time",
         "solar_system_id",
         "v_ship_type_id",
+        "v_ship_name",
         "v_character_id",
         "v_character_name",
-        "v_ship_name",
         "v_corporation_id",
         "v_corporation_name",
+        "v_alliance_id",
         "v_alliance_name",
-        "fb_character_id",
-        "fb_character_name",
+        "v_faction_id",
+        "v_faction_name",
         "fb_ship_type_id",
         "fb_ship_name",
+        "fb_character_id",
+        "fb_character_name",
         "fb_corporation_id",
         "fb_corporation_name",
         "fb_alliance_id",
         "fb_alliance_name",
-        "v_alliance_id",
-        "v_faction_id",
+        "fb_faction_id",
+        "fb_faction_name",
         "war_id",
         "a_character_ids",
         "a_corporation_ids",
@@ -86,6 +89,7 @@ async def _enrich_kill(kill: dict) -> dict:
     victim_ship_type_id = kill.get("victim_ship_type_id")
     victim_corporation_id = kill.get("victim_corporation_id")
     victim_alliance_id = kill.get("victim_alliance_id")
+    victim_faction_id = kill.get("victim_faction_id")
 
     final_blow = next(
         (a for a in kill.get("attackers", []) if a.get("final_blow")), None
@@ -94,6 +98,7 @@ async def _enrich_kill(kill: dict) -> dict:
     fb_ship_type_id = final_blow.get("ship_type_id") if final_blow else None
     fb_corporation_id = final_blow.get("corporation_id") if final_blow else None
     fb_alliance_id = final_blow.get("alliance_id") if final_blow else None
+    fb_faction_id = final_blow.get("faction_id") if final_blow else None
 
     character_ids: set[int] = set()
     type_ids: set[int] = set()
@@ -112,13 +117,16 @@ async def _enrich_kill(kill: dict) -> dict:
     alliance_ids = list(
         {a for a in [victim_alliance_id, fb_alliance_id] if a is not None}
     )
+    faction_ids = list(
+        {f for f in [victim_faction_id, fb_faction_id] if f is not None}
+    )
 
     kill_id = kill.get("killmail_id")
 
     try:
-        character_names, corp_info, alliance_info, _ = (
+        character_names, corp_info, alliance_info, faction_names = (
             await entities.fetch_entity_names(
-                character_ids, set(corp_ids), set(alliance_ids), set()
+                character_ids, set(corp_ids), set(alliance_ids), set(faction_ids)
             )
         )
         type_names = await get_type_names(type_ids)
@@ -133,6 +141,7 @@ async def _enrich_kill(kill: dict) -> dict:
         names = {}
         corp_info = {}
         alliance_info = {}
+        faction_names = {}
 
     if victim_character_id is not None:
         victim_name = names.get(victim_character_id)
@@ -154,6 +163,11 @@ async def _enrich_kill(kill: dict) -> dict:
     fb_corp = corp_info.get(fb_corporation_id) if fb_corporation_id else None
     fb_alliance = alliance_info.get(fb_alliance_id) if fb_alliance_id else None
 
+    v_faction_name = (
+        faction_names.get(victim_faction_id) if victim_faction_id else None
+    )
+    fb_faction_name = faction_names.get(fb_faction_id) if fb_faction_id else None
+
     return {
         "v_character_id": victim_character_id,
         "v_character_name": victim_name,
@@ -162,6 +176,7 @@ async def _enrich_kill(kill: dict) -> dict:
         "v_corporation_name": victim_corp[0] if victim_corp else None,
         "v_alliance_id": victim_alliance_id,
         "v_alliance_name": victim_alliance[0] if victim_alliance else None,
+        "v_faction_name": v_faction_name,
         "fb_character_id": fb_character_id,
         "fb_character_name": fb_name,
         "fb_ship_type_id": fb_ship_type_id,
@@ -170,6 +185,8 @@ async def _enrich_kill(kill: dict) -> dict:
         "fb_corporation_name": fb_corp[0] if fb_corp else None,
         "fb_alliance_id": fb_alliance_id,
         "fb_alliance_name": fb_alliance[0] if fb_alliance else None,
+        "fb_faction_id": fb_faction_id,
+        "fb_faction_name": fb_faction_name,
     }
 
 

@@ -39,6 +39,72 @@ def test_parse_kill_keeps_in_range_position(monkeypatch):
     assert (out["x"], out["y"], out["z"]) == (-4_500_000_000_000, 100_000_000_000, 0)
 
 
+def test_enrich_kill_resolves_faction_names(monkeypatch):
+    # Victim and final-blow faction ids are requested and their names surfaced.
+    captured = {}
+
+    async def fake_fetch(char_ids, corp_ids, alliance_ids, faction_ids, **k):
+        captured["faction_ids"] = set(faction_ids)
+        return {}, {}, {}, {500001: "Caldari State", 500002: "Gallente Federation"}
+
+    async def fake_types(_type_ids):
+        return {}
+
+    monkeypatch.setattr(rc.entities, "fetch_entity_names", fake_fetch)
+    monkeypatch.setattr(rc, "get_type_names", fake_types)
+
+    kill = {
+        "killmail_id": 1,
+        "victim_character_id": None,
+        "victim_ship_type_id": 670,
+        "victim_corporation_id": None,
+        "victim_alliance_id": None,
+        "victim_faction_id": 500001,
+        "attackers": [
+            {
+                "final_blow": True,
+                "character_id": None,
+                "ship_type_id": 587,
+                "corporation_id": None,
+                "alliance_id": None,
+                "faction_id": 500002,
+            }
+        ],
+    }
+    out = asyncio.run(rc._enrich_kill(kill))
+    assert captured["faction_ids"] == {500001, 500002}  # both requested
+    assert out["v_faction_name"] == "Caldari State"
+    assert out["fb_faction_id"] == 500002
+    assert out["fb_faction_name"] == "Gallente Federation"
+
+
+def test_enrich_kill_faction_fields_none_when_absent(monkeypatch):
+    async def fake_fetch(char_ids, corp_ids, alliance_ids, faction_ids, **k):
+        return {}, {}, {}, {}
+
+    async def fake_types(_type_ids):
+        return {}
+
+    monkeypatch.setattr(rc.entities, "fetch_entity_names", fake_fetch)
+    monkeypatch.setattr(rc, "get_type_names", fake_types)
+
+    kill = {
+        "killmail_id": 2,
+        "victim_character_id": 100,
+        "victim_ship_type_id": 670,
+        "victim_corporation_id": None,
+        "victim_alliance_id": None,
+        "victim_faction_id": None,
+        "attackers": [
+            {"final_blow": True, "character_id": 200, "ship_type_id": 587, "faction_id": None}
+        ],
+    }
+    out = asyncio.run(rc._enrich_kill(kill))
+    assert out["v_faction_name"] is None
+    assert out["fb_faction_id"] is None
+    assert out["fb_faction_name"] is None
+
+
 def test_facet_ids_dedup_and_null_strip():
     kill = {
         "victim_faction_id": 500003,
