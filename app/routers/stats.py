@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime
 from typing import Annotated
 
@@ -5,6 +6,7 @@ from fastapi import APIRouter, Query, Header, Depends, HTTPException
 
 from app.config import config
 from app.cache import query_cache, single_flight
+from app.global_kills import fetch_global_kills, MAP_RANGES
 from app.http_cache import json_cache_response
 from app.models import RankSystemsResponse
 from app.queries import fetch_top_systems, fetch_bottom_systems, fetch_system_kills
@@ -108,3 +110,30 @@ async def get_system_kills_stats(
                 )
     etag, gzipped, body = res
     return json_cache_response(body, gzipped, etag, ttl, if_none_match)
+
+
+@router.get("/stats/global-kills", response_model=None)
+async def get_global_kills(
+    map: Annotated[str, Query()],
+    bins: Annotated[int | None, Query(ge=1, le=2000)] = None,
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
+):
+    """Per-map kill-count histogram over the fixed global time axis
+    (EARLIEST_KILL_DATE..CURRENT_DATE), bucketed into ``bins`` equal-width bins
+    (default ``config.limits.global_kills_default_bins``). Returns a bare,
+    zero-filled, dense array of ``bins`` ints, oldest to newest."""
+    if map not in MAP_RANGES:
+        raise HTTPException(status_code=400, detail="unknown map type")
+    n = bins if bins is not None else config.limits.global_kills_default_bins
+    params = {"bins": n, "map": map}
+    res = await query_cache.get("global_kills", params)
+    if res is None:
+        async with single_flight.lock(f"global_kills:{map}:{n}"):
+            res = await query_cache.get("global_kills", params)
+            if res is None:
+                counts = await fetch_global_kills(map, n)
+                res = await query_cache.set(
+                    "global_kills", params, json.dumps(counts), ttl=config.cache.rankings_ttl
+                )
+    etag, gzipped, body = res
+    return json_cache_response(body, gzipped, etag, config.cache.rankings_ttl, if_none_match)
