@@ -1,4 +1,6 @@
 import asyncio
+import json
+from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
@@ -31,6 +33,17 @@ def test_zero_filled_dense_array(monkeypatch):
     monkeypatch.setattr(gk, "db", fake)
     out = asyncio.run(gk.fetch_global_kills("new-eden", 4))
     assert out == [5, 0, 7, 0]
+
+
+def test_decimal_kill_count_coerced_to_int(monkeypatch):
+    # SUM(bigint) in Postgres returns numeric, which asyncpg decodes as
+    # decimal.Decimal. The handler must coerce to a plain int at the boundary
+    # so the bare-array response stays stdlib-json-serializable.
+    fake = _FakeDb([{"bin": 0, "kill_count": Decimal("5")}])
+    monkeypatch.setattr(gk, "db", fake)
+    out = asyncio.run(gk.fetch_global_kills("new-eden", 4))
+    assert out[0] == 5 and type(out[0]) is int
+    assert json.loads(json.dumps(out)) == [5, 0, 0, 0]  # raises TypeError pre-fix
 
 
 def test_unknown_map_raises():

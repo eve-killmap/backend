@@ -28,5 +28,5 @@ async def fetch_global_kills(map_type: str, bins: int) -> list[int]:
     )
     out = [0] * bins
     for r in rows:
-        out[r["bin"]] = r["kill_count"]
+        out[r["bin"]] = int(r["kill_count"])
     return out
