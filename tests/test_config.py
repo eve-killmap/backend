@@ -396,8 +396,8 @@ def test_war_config_defaults():
 
 
 def test_time_window_defaults():
-    from pathlib import Path
     from app.config import load_config
+
     cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
     assert cfg.limits.system_rankings_default_limit == 10
     assert cfg.limits.global_kills_default_bins == 300
