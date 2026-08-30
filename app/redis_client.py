@@ -117,9 +117,7 @@ async def _enrich_kill(kill: dict) -> dict:
     alliance_ids = list(
         {a for a in [victim_alliance_id, fb_alliance_id] if a is not None}
     )
-    faction_ids = list(
-        {f for f in [victim_faction_id, fb_faction_id] if f is not None}
-    )
+    faction_ids = list({f for f in [victim_faction_id, fb_faction_id] if f is not None})
 
     kill_id = kill.get("killmail_id")
 
@@ -163,9 +161,7 @@ async def _enrich_kill(kill: dict) -> dict:
     fb_corp = corp_info.get(fb_corporation_id) if fb_corporation_id else None
     fb_alliance = alliance_info.get(fb_alliance_id) if fb_alliance_id else None
 
-    v_faction_name = (
-        faction_names.get(victim_faction_id) if victim_faction_id else None
-    )
+    v_faction_name = faction_names.get(victim_faction_id) if victim_faction_id else None
     fb_faction_name = faction_names.get(fb_faction_id) if fb_faction_id else None
 
     return {
@@ -431,7 +427,9 @@ class KillBroadcaster:
             adm_ttl = await esi_client.refresh_sov_structures()
         except EsiTransientError as exc:
             degraded = True
-            logger.info("Sov structures refresh skipped: %s; ADM serving last-known", exc)
+            logger.info(
+                "Sov structures refresh skipped: %s; ADM serving last-known", exc
+            )
         except Exception:
             degraded = True
             logger.warning(
@@ -490,14 +488,10 @@ class KillBroadcaster:
     def _fanout(self, payload: dict) -> None:
         system_id: int = payload["solar_system_id"]
         global_payload = {
-            k: v
-            for k, v in payload.items()
-            if k in _GLOBAL_FIELDS and v is not None
+            k: v for k, v in payload.items() if k in _GLOBAL_FIELDS and v is not None
         }
         system_payload = {
-            k: v
-            for k, v in payload.items()
-            if k in _SYSTEM_FIELDS and v is not None
+            k: v for k, v in payload.items() if k in _SYSTEM_FIELDS and v is not None
         }
 
         dead: set[asyncio.Queue] = set()

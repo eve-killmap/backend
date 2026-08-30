@@ -24,7 +24,10 @@ async def fetch_global_kills(map_type: str, bins: int) -> list[int]:
         WHERE solar_system_id >= $1 AND solar_system_id < $2
         GROUP BY bin
         """,
-        lo, hi, bins, EARLIEST_KILL_DATE,
+        lo,
+        hi,
+        bins,
+        EARLIEST_KILL_DATE,
     )
     out = [0] * bins
     for r in rows:

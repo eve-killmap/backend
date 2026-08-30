@@ -22,10 +22,6 @@ def sanitize_position(x, y, z) -> tuple[int, int, int]:
     """Coerce a position triple to ints, collapsing the whole triple to (0, 0, 0)
     -- the client's "no position" sentinel -- if any axis is out of range."""
     xi, yi, zi = int(x), int(y), int(z)
-    if (
-        abs(xi) > SAFE_COORD_MAX
-        or abs(yi) > SAFE_COORD_MAX
-        or abs(zi) > SAFE_COORD_MAX
-    ):
+    if abs(xi) > SAFE_COORD_MAX or abs(yi) > SAFE_COORD_MAX or abs(zi) > SAFE_COORD_MAX:
         return 0, 0, 0
     return xi, yi, zi

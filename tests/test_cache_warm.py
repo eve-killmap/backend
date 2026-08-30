@@ -23,14 +23,21 @@ def test_warm_all_builds_the_six_entries(monkeypatch):
     monkeypatch.setattr(cw, "build_global_kills", fake_gk)
     asyncio.run(cw.warm_all())
     assert calls["sk"] == 1 and calls["rank"] == 1
-    assert sorted(calls["gk"]) == ["abyssal-deadspace", "anoikis", "new-eden", "tutorials"]
+    assert sorted(calls["gk"]) == [
+        "abyssal-deadspace",
+        "anoikis",
+        "new-eden",
+        "tutorials",
+    ]
 
 
 def test_warm_all_respects_toggle(monkeypatch):
     import dataclasses
     from app.config import config as real
 
-    patched = dataclasses.replace(real, cache=dataclasses.replace(real.cache, warm_on_signal=False))
+    patched = dataclasses.replace(
+        real, cache=dataclasses.replace(real.cache, warm_on_signal=False)
+    )
     monkeypatch.setattr(cw, "config", patched)
     called = {"n": 0}
 

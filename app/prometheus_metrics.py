@@ -58,7 +58,9 @@ cache_hits = Counter(
 cache_misses = Counter(
     "eve_killmap_cache_misses",
     "Response-cache misses, by cache.",
-    ["cache"],  # system_rankings|system_kills|system_kills_filtered|global_kills|farthest_kill|sov|sov_map|kill_details|kill_details_processed|binary|type_name
+    [
+        "cache"
+    ],  # system_rankings|system_kills|system_kills_filtered|global_kills|farthest_kill|sov|sov_map|kill_details|kill_details_processed|binary|type_name
 )
 redis_command_seconds = Histogram(
     "eve_killmap_redis_command_seconds",

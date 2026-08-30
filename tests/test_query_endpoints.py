@@ -353,24 +353,32 @@ def test_fetch_system_kills_no_window_uses_alltime(monkeypatch):
 
     monkeypatch.setattr(q, "db", _FakeDb())
     asyncio.run(q.fetch_system_kills(None, None))
-    assert "mv_kills_per_system " in captured["sql"] or "mv_kills_per_system\n" in captured["sql"]
+    assert (
+        "mv_kills_per_system " in captured["sql"]
+        or "mv_kills_per_system\n" in captured["sql"]
+    )
     assert "mv_kills_per_system_daily" not in captured["sql"]
 
 
 def test_top_systems_windowed_intervals_use_rollup(monkeypatch):
     import asyncio
     import app.queries as q
+
     seen = []
+
     class _FakeDb:
         async def fetch(self, sql, *a):
             seen.append(sql)
             return []
+
     monkeypatch.setattr(q, "db", _FakeDb())
     asyncio.run(q.fetch_top_systems(limit=10))
     joined = "\n".join(seen)
-    assert "mv_kills_per_system_daily" in joined          # windowed intervals
-    assert "mv_kills_per_system " in joined or "FROM mv_kills_per_system\n" in joined  # all
-    assert "mv_kills_per_system_24h" not in joined         # interval MVs gone
+    assert "mv_kills_per_system_daily" in joined  # windowed intervals
+    assert (
+        "mv_kills_per_system " in joined or "FROM mv_kills_per_system\n" in joined
+    )  # all
+    assert "mv_kills_per_system_24h" not in joined  # interval MVs gone
     assert "CURRENT_DATE - INTERVAL '7 days'" in joined
 
 

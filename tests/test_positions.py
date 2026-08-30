@@ -2,7 +2,11 @@ from app.positions import sanitize_position, SAFE_COORD_MAX
 
 
 def test_in_range_passes_through_as_ints():
-    assert sanitize_position(-4.5e12, 1.0e11, 0.0) == (-4_500_000_000_000, 100_000_000_000, 0)
+    assert sanitize_position(-4.5e12, 1.0e11, 0.0) == (
+        -4_500_000_000_000,
+        100_000_000_000,
+        0,
+    )
 
 
 def test_boundary_max_safe_is_kept():

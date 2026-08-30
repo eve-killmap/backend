@@ -74,7 +74,9 @@ def test_refresh_once_transient_structures_logs_info_no_traceback(monkeypatch, c
         return 3600
 
     async def fstruct():
-        raise EsiTransientError("ESI sovereignty/structures transiently unavailable: 502 Bad Gateway")
+        raise EsiTransientError(
+            "ESI sovereignty/structures transiently unavailable: 502 Bad Gateway"
+        )
 
     monkeypatch.setattr(rc.esi_client, "refresh_sov_map", fmap)
     monkeypatch.setattr(rc.esi_client, "refresh_sov_structures", fstruct)
@@ -91,7 +93,9 @@ def test_refresh_once_transient_structures_logs_info_no_traceback(monkeypatch, c
     assert _sample("eve_killmap_sov_refreshes_total", {"outcome": "degraded"}) - d0 == 1
 
 
-def test_refresh_once_unexpected_structures_logs_warning_with_traceback(monkeypatch, caplog):
+def test_refresh_once_unexpected_structures_logs_warning_with_traceback(
+    monkeypatch, caplog
+):
     # A non-transient failure (a real fault, e.g. a shape change) stays loud.
     b = rc.KillBroadcaster()
     b._redis = _FakeRedis()

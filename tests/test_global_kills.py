@@ -24,7 +24,9 @@ def test_map_ranges_filter_by_id_range(monkeypatch):
     monkeypatch.setattr(gk, "db", fake)
     asyncio.run(gk.fetch_global_kills("abyssal-deadspace", 4))
     assert 32000000 in fake.args and 33000000 in fake.args
-    assert "solar_system_id" in fake.sql and "/ 1000000" not in fake.sql  # range, not digit
+    assert (
+        "solar_system_id" in fake.sql and "/ 1000000" not in fake.sql
+    )  # range, not digit
 
 
 def test_zero_filled_dense_array(monkeypatch):

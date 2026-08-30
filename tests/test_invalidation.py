@@ -270,9 +270,7 @@ def test_leader_warms_once_per_message_after_warmable_flush(monkeypatch):
         "data": json.dumps({"targets": ["system_kills", "system_rankings"]}),
     }
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(
-        ["query:v2:system_kills:abc", "query:v2:system_rankings:def"]
-    )
+    cache = _FakeCache(["query:v2:system_kills:abc", "query:v2:system_rankings:def"])
     warm_calls = []
 
     async def fake_warm():
@@ -340,7 +338,11 @@ def test_warm_callback_failure_does_not_crash_subscriber(monkeypatch):
 
     asyncio.run(
         invalidation.subscriber_loop(
-            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=broken_warm
+            _FakeBus(pubsub),
+            cache,
+            "cache:invalidate",
+            rc.broadcaster,
+            warm=broken_warm,
         )
     )
 

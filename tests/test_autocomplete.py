@@ -59,7 +59,13 @@ def test_autocomplete_corporation_returns_metadata(monkeypatch):
 
     dt = datetime(2010, 6, 1, tzinfo=timezone.utc)
     rows = [
-        {"id": 1, "name": "X Corp", "ticker": "XC", "member_count": 12, "date_founded": dt}
+        {
+            "id": 1,
+            "name": "X Corp",
+            "ticker": "XC",
+            "member_count": 12,
+            "date_founded": dt,
+        }
     ]
     fake = _FakeDb(rows)
     monkeypatch.setattr(ac, "db", fake)
@@ -73,7 +79,13 @@ def test_autocomplete_character_returns_null_metadata(monkeypatch):
     # Characters have neither metric; the query returns the columns as NULL and
     # still orders by name (no member_count ranking).
     rows = [
-        {"id": 5, "name": "Pilot", "ticker": None, "member_count": None, "date_founded": None}
+        {
+            "id": 5,
+            "name": "Pilot",
+            "ticker": None,
+            "member_count": None,
+            "date_founded": None,
+        }
     ]
     fake = _FakeDb(rows)
     monkeypatch.setattr(ac, "db", fake)

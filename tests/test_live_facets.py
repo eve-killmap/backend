@@ -25,7 +25,9 @@ def test_parse_kill_zeroes_out_of_range_position(monkeypatch):
 
     monkeypatch.setattr(rc, "_enrich_kill", fake_enrich)
     out = asyncio.run(
-        rc._parse_kill(_kill(1.4048816610602347e32, 6.919427609529127e31, 1.4049075104032597e32))
+        rc._parse_kill(
+            _kill(1.4048816610602347e32, 6.919427609529127e31, 1.4049075104032597e32)
+        )
     )
     assert (out["x"], out["y"], out["z"]) == (0, 0, 0)
 
@@ -96,7 +98,12 @@ def test_enrich_kill_faction_fields_none_when_absent(monkeypatch):
         "victim_alliance_id": None,
         "victim_faction_id": None,
         "attackers": [
-            {"final_blow": True, "character_id": 200, "ship_type_id": 587, "faction_id": None}
+            {
+                "final_blow": True,
+                "character_id": 200,
+                "ship_type_id": 587,
+                "faction_id": None,
+            }
         ],
     }
     out = asyncio.run(rc._enrich_kill(kill))

@@ -90,6 +90,7 @@ async def build_system_kills(
 
         async def builder():
             return await fetch_system_kills(s, e)
+
     else:
         key = flt.canonical()
         prefix, ttl, lock, params = (
@@ -153,7 +154,10 @@ async def build_global_kills(map: str, bins: int) -> tuple[str, bool, bytes]:
             if res is None:
                 counts = await fetch_global_kills(map, bins)
                 res = await query_cache.set(
-                    "global_kills", params, json.dumps(counts), ttl=config.cache.rankings_ttl
+                    "global_kills",
+                    params,
+                    json.dumps(counts),
+                    ttl=config.cache.rankings_ttl,
                 )
     return res
 
@@ -172,4 +176,6 @@ async def get_global_kills(
         raise HTTPException(status_code=400, detail="unknown map type")
     n = bins if bins is not None else config.limits.global_kills_default_bins
     etag, gzipped, body = await build_global_kills(map, n)
-    return json_cache_response(body, gzipped, etag, config.cache.rankings_ttl, if_none_match)
+    return json_cache_response(
+        body, gzipped, etag, config.cache.rankings_ttl, if_none_match
+    )

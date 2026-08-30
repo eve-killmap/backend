@@ -3,7 +3,11 @@ import time
 
 from app.config import config
 from app.global_kills import MAP_RANGES
-from app.routers.stats import build_system_kills, build_system_rankings, build_global_kills
+from app.routers.stats import (
+    build_system_kills,
+    build_system_rankings,
+    build_global_kills,
+)
 from app import prometheus_metrics as pm
 
 logger = logging.getLogger(__name__)
