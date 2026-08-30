@@ -26,14 +26,13 @@ def _parse_day(s: str | None) -> date | None:
         raise HTTPException(status_code=400, detail="dates must be YYYY-MM-DD")
 
 
-@router.get("/stats/system-rankings", response_model=None)
-async def get_system_rankings(
-    limit: Annotated[
-        int, Query(ge=1, le=50, description="Number of systems to return")
-    ] = config.limits.system_rankings_default_limit,
-    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
-):
-    """Get rank list of solar systems by highest/lowest number of kills."""
+async def build_system_rankings(limit: int) -> tuple[str, bool, bytes]:
+    """Get-or-build-and-cache the system-rankings response for ``limit``.
+
+    Shared by the endpoint and the leader's cache-warm cycle; both must resolve
+    to the exact same cache key, so this must stay the sole owner of the
+    ``system_rankings`` prefix + params shape.
+    """
     cache_params = {"limit": limit}
     res = await query_cache.get("system_rankings", cache_params)
     if res is None:
@@ -49,35 +48,39 @@ async def get_system_rankings(
                     result.model_dump_json(),
                     ttl=config.cache.rankings_ttl,
                 )
-    etag, gzipped, body = res
+    return res
+
+
+@router.get("/stats/system-rankings", response_model=None)
+async def get_system_rankings(
+    limit: Annotated[
+        int, Query(ge=1, le=50, description="Number of systems to return")
+    ] = config.limits.system_rankings_default_limit,
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
+):
+    """Get rank list of solar systems by highest/lowest number of kills."""
+    etag, gzipped, body = await build_system_rankings(limit)
     return json_cache_response(
         body, gzipped, etag, config.cache.rankings_ttl, if_none_match
     )
 
 
-@router.get("/stats/system-kills", response_model=None)
-async def get_system_kills_stats(
-    flt: Filter = Depends(get_filter),
-    start: Annotated[
-        str | None, Query(description="UTC day, YYYY-MM-DD; inclusive")
-    ] = None,
-    end: Annotated[
-        str | None, Query(description="UTC day, YYYY-MM-DD; exclusive")
-    ] = None,
-    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
-):
-    """Per-system kill counts as index-aligned columns: counts[i] belongs to
-    system_ids[i]. All-time by default; ``start``/``end`` restrict to a
-    day-aligned, half-open UTC window ``[start, end)`` (either independently
-    optional). Unfiltered requests serve from the pre-computed MVs (cached
-    like /stats/system-rankings, same TTL). Filtered requests (``f=`` params)
-    compute from ``kill_facets`` and cache under a separate prefix with their
-    own TTL."""
+async def build_system_kills(
+    start: str | None, end: str | None, flt: Filter | None
+) -> tuple[str, bool, bytes]:
+    """Get-or-build-and-cache the system-kills response for ``start``/``end``/``flt``.
+
+    Shared by the endpoint and the leader's cache-warm cycle; both must resolve
+    to the exact same cache key, so this must stay the sole owner of the
+    ``system_kills``/``system_kills_filtered`` prefixes + params shapes.
+    ``flt`` may be ``None`` (treated as unfiltered) so the warm cycle can call
+    this with no ``Filter`` instance in hand.
+    """
     s, e = _parse_day(start), _parse_day(end)
     if s is not None and e is not None and e <= s:
         raise HTTPException(status_code=400, detail="end must be after start")
 
-    if flt.is_empty:
+    if flt is None or flt.is_empty:
         prefix, ttl, lock, params = (
             "system_kills",
             config.cache.rankings_ttl,
@@ -108,8 +111,51 @@ async def get_system_kills_stats(
                 res = await query_cache.set(
                     prefix, params, result.model_dump_json(), ttl=ttl
                 )
-    etag, gzipped, body = res
+    return res
+
+
+@router.get("/stats/system-kills", response_model=None)
+async def get_system_kills_stats(
+    flt: Filter = Depends(get_filter),
+    start: Annotated[
+        str | None, Query(description="UTC day, YYYY-MM-DD; inclusive")
+    ] = None,
+    end: Annotated[
+        str | None, Query(description="UTC day, YYYY-MM-DD; exclusive")
+    ] = None,
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
+):
+    """Per-system kill counts as index-aligned columns: counts[i] belongs to
+    system_ids[i]. All-time by default; ``start``/``end`` restrict to a
+    day-aligned, half-open UTC window ``[start, end)`` (either independently
+    optional). Unfiltered requests serve from the pre-computed MVs (cached
+    like /stats/system-rankings, same TTL). Filtered requests (``f=`` params)
+    compute from ``kill_facets`` and cache under a separate prefix with their
+    own TTL."""
+    etag, gzipped, body = await build_system_kills(start, end, flt)
+    ttl = config.cache.rankings_ttl if flt.is_empty else config.cache.filtered_map_ttl
     return json_cache_response(body, gzipped, etag, ttl, if_none_match)
+
+
+async def build_global_kills(map: str, bins: int) -> tuple[str, bool, bytes]:
+    """Get-or-build-and-cache the global-kills histogram for ``map``/``bins``.
+
+    Shared by the endpoint and the leader's cache-warm cycle; both must resolve
+    to the exact same cache key, so this must stay the sole owner of the
+    ``global_kills`` prefix + params shape. Caller must have already validated
+    ``map`` against ``MAP_RANGES``.
+    """
+    params = {"bins": bins, "map": map}
+    res = await query_cache.get("global_kills", params)
+    if res is None:
+        async with single_flight.lock(f"global_kills:{map}:{bins}"):
+            res = await query_cache.get("global_kills", params)
+            if res is None:
+                counts = await fetch_global_kills(map, bins)
+                res = await query_cache.set(
+                    "global_kills", params, json.dumps(counts), ttl=config.cache.rankings_ttl
+                )
+    return res
 
 
 @router.get("/stats/global-kills", response_model=None)
@@ -125,15 +171,5 @@ async def get_global_kills(
     if map not in MAP_RANGES:
         raise HTTPException(status_code=400, detail="unknown map type")
     n = bins if bins is not None else config.limits.global_kills_default_bins
-    params = {"bins": n, "map": map}
-    res = await query_cache.get("global_kills", params)
-    if res is None:
-        async with single_flight.lock(f"global_kills:{map}:{n}"):
-            res = await query_cache.get("global_kills", params)
-            if res is None:
-                counts = await fetch_global_kills(map, n)
-                res = await query_cache.set(
-                    "global_kills", params, json.dumps(counts), ttl=config.cache.rankings_ttl
-                )
-    etag, gzipped, body = res
+    etag, gzipped, body = await build_global_kills(map, n)
     return json_cache_response(body, gzipped, etag, config.cache.rankings_ttl, if_none_match)
