@@ -53,7 +53,7 @@ async def subscriber_loop(
     cache: aioredis.Redis,
     channel: str,
     broadcaster: "KillBroadcaster",
-    warm: Callable[[str], Awaitable[None]] | None = None,
+    warm: Callable[[], Awaitable[None]] | None = None,
 ) -> None:
     """Listen for invalidation messages on ``bus`` and evict matching keys from
     ``cache``.
@@ -65,8 +65,11 @@ async def subscriber_loop(
     ``broadcaster`` supplies ``is_leader`` so that WARMABLE_TARGETS are only
     flushed by the leader worker (which owns flush+warm for those targets);
     non-leaders skip them entirely and keep serving the shared cache. ``warm``
-    is an optional callback invoked after a warmable target's flush (wired up
-    in a later task); it is unused for now.
+    is an optional callback (bound to ``cache_warm.warm_all``) invoked once per
+    message, after the target loop, when the process is leader and at least
+    one warmable target was seen in that message — it repopulates the warm set
+    right after the leader's flush so the cache isn't left cold for the next
+    request.
     """
     pubsub = bus.pubsub()
     await pubsub.subscribe(channel)
@@ -80,6 +83,7 @@ async def subscriber_loop(
             except (json.JSONDecodeError, AttributeError) as exc:
                 logger.warning("Bad invalidation message: %s", exc)
                 continue
+            saw_warmable = False
             for target in targets:
                 pattern = INVALIDATION_PATTERNS.get(target)
                 if pattern is None:
@@ -96,6 +100,17 @@ async def subscriber_loop(
                     logger.warning(
                         "Invalidation delete failed for %s: %s", pattern, exc
                     )
+                if target in WARMABLE_TARGETS:
+                    saw_warmable = True
+            if saw_warmable and broadcaster.is_leader and warm is not None:
+                try:
+                    await warm()
+                except Exception as exc:
+                    # warm_all() already catches + counts its own failures; this
+                    # is a last-resort guard so a broken/replacement ``warm``
+                    # callback can never take the subscriber loop down.
+                    pm.errors.labels(component="cache_warm").inc()
+                    logger.warning("Cache warm callback failed: %s", exc)
     except asyncio.CancelledError:
         raise
     finally:

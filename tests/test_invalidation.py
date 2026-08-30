@@ -259,3 +259,107 @@ def test_warmable_target_pattern_does_not_match_filtered_key(monkeypatch):
     )
 
     assert cache.deleted == ["query:v2:system_kills:abc"]
+
+
+def test_leader_warms_once_per_message_after_warmable_flush(monkeypatch):
+    # A single message names two warmable targets; warm() must fire exactly
+    # once for the whole message, not once per target.
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {
+        "type": "message",
+        "data": json.dumps({"targets": ["system_kills", "system_rankings"]}),
+    }
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(
+        ["query:v2:system_kills:abc", "query:v2:system_rankings:def"]
+    )
+    warm_calls = []
+
+    async def fake_warm():
+        warm_calls.append(1)
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=fake_warm
+        )
+    )
+
+    assert warm_calls == [1]
+
+
+def test_non_leader_never_calls_warm(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v2:system_kills:abc"])
+    warm_calls = []
+
+    async def fake_warm():
+        warm_calls.append(1)
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=fake_warm
+        )
+    )
+
+    assert warm_calls == []
+
+
+def test_non_warmable_target_does_not_trigger_warm(monkeypatch):
+    # sov flushes on every worker but must never trigger a warm cycle.
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v2:sov:abc"])
+    warm_calls = []
+
+    async def fake_warm():
+        warm_calls.append(1)
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=fake_warm
+        )
+    )
+
+    assert warm_calls == []
+
+
+def test_warm_callback_failure_does_not_crash_subscriber(monkeypatch):
+    # warm_all() already swallows its own errors, but subscriber_loop must be
+    # defensive too -- a broken warm callback must never take the loop down,
+    # and the flush it followed must still have taken effect.
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v2:system_kills:abc"])
+
+    async def broken_warm():
+        raise RuntimeError("boom")
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=broken_warm
+        )
+    )
+
+    assert cache.deleted == ["query:v2:system_kills:abc"]
+    assert pubsub.closed is True
+
+
+def test_warm_default_none_is_never_called(monkeypatch):
+    # Backward-compatible default: omitting warm must not attempt to call
+    # anything (this is exactly how Task 6's pre-existing call sites behave).
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v2:system_kills:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == ["query:v2:system_kills:abc"]

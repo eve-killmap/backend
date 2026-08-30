@@ -17,6 +17,7 @@ from app.redis_client import broadcaster
 from app import prometheus_metrics
 import app.queries as queries
 import app.invalidation as invalidation
+import app.cache_warm as cache_warm
 from app import entities
 
 
@@ -65,6 +66,7 @@ async def lifespan(_app: FastAPI):
                     cache_redis,
                     config.streaming.invalidate_channel,
                     broadcaster,
+                    warm=cache_warm.warm_all,
                 )
             )
         else:
@@ -79,9 +81,25 @@ async def lifespan(_app: FastAPI):
     health.set_bus_redis(invalidate_bus)
     prometheus_metrics.start_exporter(config)
     await broadcaster.start()
+
+    async def _startup_warm() -> None:
+        # broadcaster.start() only *schedules* the leader-election loop (it
+        # returns before that task gets a chance to run), so `is_leader` is
+        # never yet resolved right here -- checking it synchronously would
+        # always see the pre-election default (False) and never warm. Give
+        # the election's first attempt (a single Redis SET NX round trip) a
+        # short window to complete before deciding. This is purely a
+        # cache-warming optimization, so a missed window here is harmless:
+        # the next MV-refresh signal (or a lazily-built request) still
+        # covers it.
+        await asyncio.sleep(0.5)
+        if broadcaster.is_leader:
+            await cache_warm.warm_all()
+
+    startup_warm_task = asyncio.create_task(_startup_warm())
     yield
     await broadcaster.stop()
-    for task in (heartbeat_task, invalidation_task):
+    for task in (heartbeat_task, invalidation_task, startup_warm_task):
         if task is not None:
             task.cancel()
             try:
