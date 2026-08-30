@@ -1,4 +1,5 @@
 import time
+from datetime import date
 
 from app.database import db
 from app.filters import Filter, build_map_sql, build_system_sql
@@ -6,9 +7,11 @@ from app.models import SystemKillsResponse, SystemKillIdsResponse
 from app import prometheus_metrics as pm
 
 
-async def fetch_filtered_map(f: Filter) -> SystemKillsResponse:
+async def fetch_filtered_map(
+    f: Filter, start: date | None = None, end: date | None = None
+) -> SystemKillsResponse:
     pm.filter_conditions.observe(len(f.conditions))
-    sql, params = build_map_sql(f)
+    sql, params = build_map_sql(f, start, end)
     _start = time.perf_counter()
     try:
         rows = await db.fetch(sql, *params)

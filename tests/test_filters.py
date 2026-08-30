@@ -114,3 +114,53 @@ def test_system_multi_condition_sql():
     assert "f.solar_system_id = $" in sql
     assert "EXISTS (SELECT 1 FROM kill_facets g" in sql
     assert 30000142 in params
+
+
+def test_map_single_condition_no_window_has_no_time_predicate():
+    f = parse_filter(["alliance:attacker:99005338"], **M)
+    sql, params = build_map_sql(f)
+    assert "killmail_time" not in sql
+    assert params == [3, [99005338], 1]
+
+
+def test_map_single_condition_window_both_bounds():
+    from datetime import date, datetime, timezone
+
+    f = parse_filter(["alliance:attacker:99005338"], **M)
+    sql, params = build_map_sql(f, date(2026, 1, 1), date(2026, 3, 1))
+    assert "AND killmail_time >= $4" in sql
+    assert "AND killmail_time < $5" in sql
+    assert params[:3] == [3, [99005338], 1]
+    assert params[3] == datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert params[4] == datetime(2026, 3, 1, tzinfo=timezone.utc)
+
+
+def test_map_single_condition_window_start_only():
+    from datetime import date, datetime, timezone
+
+    f = parse_filter(["war:any"], **M)
+    sql, params = build_map_sql(f, date(2026, 1, 1), None)
+    assert "killmail_time >= $2" in sql
+    assert "killmail_time <" not in sql
+    assert params == [7, datetime(2026, 1, 1, tzinfo=timezone.utc)]
+
+
+def test_map_single_condition_window_end_only():
+    from datetime import date, datetime, timezone
+
+    f = parse_filter(["war:any"], **M)
+    sql, params = build_map_sql(f, None, date(2026, 3, 1))
+    assert "killmail_time <" in sql
+    assert "killmail_time >=" not in sql
+    assert params == [7, datetime(2026, 3, 1, tzinfo=timezone.utc)]
+
+
+def test_map_multi_condition_window_uses_driver_alias():
+    from datetime import date, datetime, timezone
+
+    f = parse_filter(["ship:attacker:670", "character:victim:12345"], **M)
+    sql, params = build_map_sql(f, date(2026, 1, 1), date(2026, 3, 1))
+    assert "f.killmail_time >= $4" in sql
+    assert "f.killmail_time < $5" in sql
+    assert params[3] == datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert params[4] == datetime(2026, 3, 1, tzinfo=timezone.utc)

@@ -213,7 +213,7 @@ def test_system_kills_single_flight_builds_once(monkeypatch):
         store["sk"] = res
         return res
 
-    async def fake_fetch():
+    async def fake_fetch(start=None, end=None):
         calls.append(1)
         await asyncio.sleep(0.02)
         return SystemKillsResponse(system_ids=[1], counts=[5])
@@ -318,3 +318,75 @@ def test_system_kills_response_is_single_count():
     r = SystemKillsResponse(system_ids=[1, 2], counts=[5, 0])
     assert r.counts == [5, 0]
     assert not hasattr(r, "day")  # six-bucket fields gone
+
+
+def test_fetch_system_kills_windowed_uses_daily_rollup(monkeypatch):
+    import asyncio
+    from datetime import date
+    import app.queries as q
+
+    captured = {}
+
+    class _FakeDb:
+        async def fetch(self, sql, *args):
+            captured["sql"] = sql
+            captured["args"] = args
+            return []
+
+    monkeypatch.setattr(q, "db", _FakeDb())
+    asyncio.run(q.fetch_system_kills(date(2026, 1, 1), date(2026, 3, 1)))
+    assert "mv_kills_per_system_daily" in captured["sql"]
+    assert "day >=" in captured["sql"] and "day <" in captured["sql"]
+    assert captured["args"] == (date(2026, 1, 1), date(2026, 3, 1))
+
+
+def test_fetch_system_kills_no_window_uses_alltime(monkeypatch):
+    import asyncio
+    import app.queries as q
+
+    captured = {}
+
+    class _FakeDb:
+        async def fetch(self, sql, *args):
+            captured["sql"] = sql
+            return []
+
+    monkeypatch.setattr(q, "db", _FakeDb())
+    asyncio.run(q.fetch_system_kills(None, None))
+    assert "mv_kills_per_system " in captured["sql"] or "mv_kills_per_system\n" in captured["sql"]
+    assert "mv_kills_per_system_daily" not in captured["sql"]
+
+
+def _empty_filter():
+    return parse_filter([], max_conditions=8, max_ids=50)
+
+
+def test_system_kills_endpoint_rejects_bad_window():
+    import asyncio, pytest
+    from fastapi import HTTPException
+    import app.routers.stats as stats
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(
+            stats.get_system_kills_stats(
+                flt=_empty_filter(), start="nope", end=None, if_none_match=None
+            )
+        )
+    assert e.value.status_code == 400
+
+
+def test_system_kills_endpoint_rejects_end_le_start():
+    import asyncio, pytest
+    from fastapi import HTTPException
+    import app.routers.stats as stats
+
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(
+            stats.get_system_kills_stats(
+                flt=_empty_filter(),
+                start="2026-03-01",
+                end="2026-01-01",
+                if_none_match=None,
+            )
+        )
+    assert e.value.status_code == 400

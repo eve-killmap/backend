@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -265,11 +265,29 @@ async def fetch_bottom_systems(limit: int = 10) -> list[RankSystem]:
     ]
 
 
-async def fetch_system_kills() -> SystemKillsResponse:
-    rows = await db.fetch(
-        "SELECT solar_system_id, kill_count FROM mv_kills_per_system "
-        "ORDER BY solar_system_id"
-    )
+async def fetch_system_kills(
+    start: date | None = None, end: date | None = None
+) -> SystemKillsResponse:
+    if start is None and end is None:
+        rows = await db.fetch(
+            "SELECT solar_system_id, kill_count FROM mv_kills_per_system "
+            "ORDER BY solar_system_id"
+        )
+    else:
+        conds, args = [], []
+        if start is not None:
+            args.append(start)
+            conds.append(f"day >= ${len(args)}")
+        if end is not None:
+            args.append(end)
+            conds.append(f"day < ${len(args)}")
+        where = " AND ".join(conds)
+        rows = await db.fetch(
+            "SELECT solar_system_id, SUM(kill_count) AS kill_count "
+            f"FROM mv_kills_per_system_daily WHERE {where} "
+            "GROUP BY solar_system_id ORDER BY solar_system_id",
+            *args,
+        )
     return SystemKillsResponse(
         system_ids=[r["solar_system_id"] for r in rows],
         counts=[r["kill_count"] for r in rows],

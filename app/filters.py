@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 
 ATTRIBUTE_KINDS = {
     "character": 1,
@@ -137,6 +138,26 @@ def _exists(cond: Condition, params: list) -> str:
     )
 
 
+def _midnight(d: date) -> datetime:
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+
+
+def _window_preds(
+    start: date | None, end: date | None, params: list, alias: str = ""
+) -> list[str]:
+    """Append optional window bounds to params; return their SQL predicates
+    (referencing killmail_time at UTC midnight for the given dates)."""
+    p = f"{alias}." if alias else ""
+    preds: list[str] = []
+    if start is not None:
+        params.append(_midnight(start))
+        preds.append(f"{p}killmail_time >= ${len(params)}")
+    if end is not None:
+        params.append(_midnight(end))
+        preds.append(f"{p}killmail_time < ${len(params)}")
+    return preds
+
+
 def _split_driver(f: Filter) -> tuple[Condition, list[Condition]]:
     if not f.conditions:
         raise FilterError("cannot build SQL for an empty filter")
@@ -149,10 +170,14 @@ def _split_driver(f: Filter) -> tuple[Condition, list[Condition]]:
     return driver, others
 
 
-def build_map_sql(f: Filter) -> tuple[str, list]:
+def build_map_sql(
+    f: Filter, start: date | None = None, end: date | None = None
+) -> tuple[str, list]:
     params: list = []
     if len(f.conditions) == 1:
         where = _pred(f.conditions[0], params)
+        for pred in _window_preds(start, end, params):
+            where += f" AND {pred}"
         sql = f"""
         SELECT solar_system_id,
           {_bucket_sql("killmail_time")}
@@ -164,6 +189,8 @@ def build_map_sql(f: Filter) -> tuple[str, list]:
 
     driver, others = _split_driver(f)
     where = _pred(driver, params, alias="f")
+    for pred in _window_preds(start, end, params, alias="f"):
+        where += f" AND {pred}"
     exists_sql = "\n            AND ".join(_exists(c, params) for c in others)
     sql = f"""
         SELECT solar_system_id,
