@@ -393,3 +393,12 @@ def test_war_config_defaults():
     assert cfg.cache.war_details_ttl == 21600
     assert cfg.limits.max_war_ids == 200
     assert cfg.limits.encode_offload_min_rows == 2000
+
+
+def test_time_window_defaults():
+    from pathlib import Path
+    from app.config import load_config
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.limits.system_rankings_default_limit == 10
+    assert cfg.limits.global_kills_default_bins == 300
+    assert cfg.cache.warm_on_signal is True

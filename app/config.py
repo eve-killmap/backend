@@ -78,6 +78,7 @@ class CacheConfig:
     war_search_ttl: int
     war_details_ttl: int
     sov_map_ttl: int
+    warm_on_signal: bool
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,8 @@ class LimitsConfig:
     max_war_results: int
     max_war_ids: int
     encode_offload_min_rows: int
+    system_rankings_default_limit: int
+    global_kills_default_bins: int
 
 
 @dataclass(frozen=True)
@@ -341,6 +344,7 @@ def load_config(
         sov_map_ttl=_as_int(
             cache_cfg.get("sov_map_ttl", 3600), "cache.sov_map_ttl", minimum=1
         ),
+        warm_on_signal=bool(cache_cfg.get("warm_on_signal", True)),
     )
 
     cache_redis_keepalive = cache_redis_cfg.get("socket_keepalive", True)
@@ -443,6 +447,14 @@ def load_config(
             limits_cfg.get("encode_offload_min_rows", 2000),
             "limits.encode_offload_min_rows",
             minimum=1,
+        ),
+        system_rankings_default_limit=_as_int(
+            limits_cfg.get("system_rankings_default_limit", 10),
+            "limits.system_rankings_default_limit", minimum=1,
+        ),
+        global_kills_default_bins=_as_int(
+            limits_cfg.get("global_kills_default_bins", 300),
+            "limits.global_kills_default_bins", minimum=1,
         ),
     )
 
