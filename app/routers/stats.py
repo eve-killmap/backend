@@ -28,7 +28,7 @@ def _parse_day(s: str | None) -> date | None:
 async def get_system_rankings(
     limit: Annotated[
         int, Query(ge=1, le=50, description="Number of systems to return")
-    ] = 10,
+    ] = config.limits.system_rankings_default_limit,
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ):
     """Get rank list of solar systems by highest/lowest number of kills."""

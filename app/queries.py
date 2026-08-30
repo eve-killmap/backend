@@ -26,13 +26,12 @@ def set_redis(redis_client: aioredis.Redis) -> None:
     _redis = redis_client
 
 
-top_systems_views = {
-    "all": "mv_kills_per_system",
-    "24h": "mv_kills_per_system_24h",
-    "7d": "mv_kills_per_system_7d",
-    "30d": "mv_kills_per_system_30d",
-    "6m": "mv_kills_per_system_6m",
-    "1y": "mv_kills_per_system_1y",
+_TOP_INTERVALS = {  # response-key -> trailing interval (day-aligned, incl. today)
+    "day": "1 day",
+    "week": "7 days",
+    "month": "30 days",
+    "six_months": "6 months",
+    "year": "1 year",
 }
 
 
@@ -213,38 +212,41 @@ async def fetch_raw_kills(
 
 
 async def fetch_top_systems(limit: int = 10) -> TopSystems:
-    raw = {}
+    async def _all():
+        return await db.fetch(
+            "SELECT solar_system_id, kill_count FROM mv_kills_per_system "
+            "ORDER BY kill_count DESC LIMIT $1",
+            limit,
+        )
 
-    for key, view in top_systems_views.items():
-        query = f"""
-            SELECT
-                solar_system_id,
-                kill_count
-            FROM {view}
-            ORDER BY kill_count DESC
-            LIMIT $1
-        """
-        rows = await db.fetch(query, limit)
+    async def _interval(iv: str):
+        # `iv` is drawn only from the fixed _TOP_INTERVALS allowlist above,
+        # never from user input, so this f-string is safe.
+        return await db.fetch(
+            "SELECT solar_system_id, SUM(kill_count) AS kill_count "
+            "FROM mv_kills_per_system_daily "
+            f"WHERE day > CURRENT_DATE - INTERVAL '{iv}' "
+            "GROUP BY solar_system_id ORDER BY kill_count DESC LIMIT $1",
+            limit,
+        )
 
-        data = [
-            RankSystem(
-                solar_system_id=row["solar_system_id"], kill_count=row["kill_count"]
-            )
-            for row in rows
+    def _rank(rows):
+        return [
+            RankSystem(solar_system_id=r["solar_system_id"], kill_count=r["kill_count"])
+            for r in rows
         ]
 
-        raw[key] = data
+    all_rows = _rank(await _all())
+    by_key = {k: _rank(await _interval(iv)) for k, iv in _TOP_INTERVALS.items()}
 
-    result = TopSystems(
-        all=raw["all"],
-        day=raw["24h"],
-        week=raw["7d"],
-        month=raw["30d"],
-        six_months=raw["6m"],
-        year=raw["1y"],
+    return TopSystems(
+        all=all_rows,
+        day=by_key["day"],
+        week=by_key["week"],
+        month=by_key["month"],
+        six_months=by_key["six_months"],
+        year=by_key["year"],
     )
-
-    return result
 
 
 async def fetch_bottom_systems(limit: int = 10) -> list[RankSystem]:
