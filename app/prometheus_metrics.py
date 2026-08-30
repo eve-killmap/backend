@@ -53,12 +53,12 @@ cache_hits = Counter(
     "Response-cache hits, by cache.",
     [
         "cache"
-    ],  # system_rankings|farthest_kill|sov|sov_map|kill_details|kill_details_processed|binary|type_name
+    ],  # system_rankings|system_kills|system_kills_filtered|global_kills|farthest_kill|sov|sov_map|kill_details|kill_details_processed|binary|type_name
 )
 cache_misses = Counter(
     "eve_killmap_cache_misses",
     "Response-cache misses, by cache.",
-    ["cache"],
+    ["cache"],  # system_rankings|system_kills|system_kills_filtered|global_kills|farthest_kill|sov|sov_map|kill_details|kill_details_processed|binary|type_name
 )
 redis_command_seconds = Histogram(
     "eve_killmap_redis_command_seconds",
@@ -72,12 +72,26 @@ redis_command_seconds = Histogram(
 cache_invalidations_received = Counter(
     "eve_killmap_cache_invalidations_received",
     "Cache-invalidation messages received, by target.",
-    ["target"],  # system_rankings|farthest_kill|sov|sov_map
+    ["target"],  # system_rankings|system_kills|global_kills|farthest_kill|sov|sov_map
 )
 cache_keys_evicted = Counter(
     "eve_killmap_cache_keys_evicted",
     "Cache keys evicted by invalidation, by target.",
-    ["target"],
+    ["target"],  # system_rankings|system_kills|global_kills|farthest_kill|sov|sov_map
+)
+
+cache_warm_runs_total = Counter(
+    "eve_killmap_cache_warm_runs_total",
+    "Leader cache-warm cycles, by outcome.",
+    ["outcome"],  # success|error
+)
+cache_warm_seconds = Histogram(
+    "eve_killmap_cache_warm_seconds",
+    "Duration of a leader cache-warm cycle.",
+)
+cache_warm_last_success_timestamp_seconds = Gauge(
+    "eve_killmap_cache_warm_last_success_timestamp_seconds",
+    "Unix time of the last successful cache-warm cycle.",
 )
 
 

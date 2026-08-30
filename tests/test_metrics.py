@@ -34,3 +34,14 @@ def test_unsubscribe_global_gauge_no_negative_drift():
     assert metrics.ws_global_connections == base
     b.unsubscribe_global(q)  # double unsubscribe must be a no-op for the gauge
     assert metrics.ws_global_connections == base
+
+
+def test_cache_warm_metrics_exist():
+    from prometheus_client import REGISTRY
+    from app import prometheus_metrics as pm
+    pm.cache_warm_runs_total.labels(outcome="success").inc()
+    assert REGISTRY.get_sample_value(
+        "eve_killmap_cache_warm_runs_total", {"outcome": "success"}
+    ) is not None
+    assert pm.cache_warm_seconds is not None
+    assert pm.cache_warm_last_success_timestamp_seconds is not None
