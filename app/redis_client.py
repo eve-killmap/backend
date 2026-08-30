@@ -523,6 +523,10 @@ class KillBroadcaster:
     def is_running(self) -> bool:
         return self._subscriber_task is not None and not self._subscriber_task.done()
 
+    @property
+    def is_leader(self) -> bool:
+        return self._is_leader
+
     def subscribe_global(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
         self._global_subs.add(q)

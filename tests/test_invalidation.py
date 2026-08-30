@@ -1,8 +1,33 @@
 import asyncio
+import fnmatch
 import json
 
 import app.invalidation as invalidation
+import app.redis_client as rc
 from app.invalidation import patterns_for_targets
+
+
+def test_new_patterns_present():
+    from app.invalidation import INVALIDATION_PATTERNS
+
+    assert INVALIDATION_PATTERNS["system_kills"] == "query:v2:system_kills:*"
+    assert INVALIDATION_PATTERNS["global_kills"] == "query:v2:global_kills:*"
+
+
+def test_system_kills_pattern_excludes_filtered():
+    # 'query:v2:system_kills:*' must not match 'query:v2:system_kills_filtered:...'
+    assert not fnmatch.fnmatch(
+        "query:v2:system_kills_filtered:abc", "query:v2:system_kills:*"
+    )
+    assert fnmatch.fnmatch("query:v2:system_kills:xyz", "query:v2:system_kills:*")
+
+
+def test_warmable_targets_set():
+    assert invalidation.WARMABLE_TARGETS == {
+        "system_rankings",
+        "system_kills",
+        "global_kills",
+    }
 
 
 def test_patterns_for_known_targets():
@@ -89,7 +114,9 @@ def test_subscriber_subscribes_on_bus_and_deletes_on_cache():
         ["query:v2:sov:abc", "query:v2:sov:def", "query:v2:system_rankings:x"]
     )
 
-    asyncio.run(invalidation.subscriber_loop(bus, cache, "cache:invalidate"))
+    asyncio.run(
+        invalidation.subscriber_loop(bus, cache, "cache:invalidate", rc.broadcaster)
+    )
 
     # Subscription happened on the bus connection...
     assert pubsub.subscribed == "cache:invalidate"
@@ -106,7 +133,9 @@ def test_subscriber_ignores_unknown_targets():
     cache = _FakeCache(["query:v2:sov:abc"])
 
     asyncio.run(
-        invalidation.subscriber_loop(_FakeBus(pubsub), cache, "cache:invalidate")
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
     )
 
     assert cache.deleted == []
@@ -119,7 +148,9 @@ def test_subscriber_skips_malformed_message():
     cache = _FakeCache(["query:v2:sov:abc"])
 
     asyncio.run(
-        invalidation.subscriber_loop(_FakeBus(pubsub), cache, "cache:invalidate")
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
     )
 
     assert cache.deleted == []
@@ -143,7 +174,9 @@ def test_subscriber_records_received_and_evicted_metrics():
     e0 = _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"})
 
     asyncio.run(
-        invalidation.subscriber_loop(_FakeBus(pubsub), cache, "cache:invalidate")
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
     )
 
     assert (
@@ -152,3 +185,77 @@ def test_subscriber_records_received_and_evicted_metrics():
         == 1
     )
     assert _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"}) - e0 == 2
+
+
+def test_broadcaster_is_leader_property_reflects_internal_flag(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    assert rc.broadcaster.is_leader is True
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
+    assert rc.broadcaster.is_leader is False
+
+
+def test_non_leader_skips_warmable_target(monkeypatch):
+    # system_kills is warmable; a non-leader worker must not flush it itself
+    # (the leader owns flush+warm to avoid a flush/warm race).
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v2:system_kills:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == []
+
+
+def test_leader_flushes_warmable_target(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v2:system_kills:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == ["query:v2:system_kills:abc"]
+
+
+def test_non_warmable_target_flushed_regardless_of_leadership(monkeypatch):
+    # sov is not in WARMABLE_TARGETS; every worker keeps flushing it on its own,
+    # leader or not.
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
+    msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v2:sov:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == ["query:v2:sov:abc"]
+
+
+def test_warmable_target_pattern_does_not_match_filtered_key(monkeypatch):
+    # query:v2:system_kills:* must not evict query:v2:system_kills_filtered:* keys.
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(
+        ["query:v2:system_kills:abc", "query:v2:system_kills_filtered:def"]
+    )
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == ["query:v2:system_kills:abc"]

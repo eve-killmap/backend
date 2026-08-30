@@ -61,7 +61,10 @@ async def lifespan(_app: FastAPI):
             invalidate_bus = aioredis.from_url(config.redis_url, decode_responses=True)
             invalidation_task = asyncio.create_task(
                 invalidation.subscriber_loop(
-                    invalidate_bus, cache_redis, config.streaming.invalidate_channel
+                    invalidate_bus,
+                    cache_redis,
+                    config.streaming.invalidate_channel,
+                    broadcaster,
                 )
             )
         else:
