@@ -29,7 +29,7 @@ async def warm_all() -> None:
         await build_system_rankings(config.limits.system_rankings_default_limit)
         bins = config.limits.global_kills_default_bins
         for map_type in MAP_RANGES:
-            await build_global_kills(map_type, bins)
+            await build_global_kills(map_type, bins, None)
         pm.cache_warm_seconds.observe(time.monotonic() - start)
         pm.cache_warm_runs_total.labels(outcome="success").inc()
         pm.cache_warm_last_success_timestamp_seconds.set_to_current_time()

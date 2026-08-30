@@ -115,6 +115,19 @@ def _bucket_sql(time_col: str) -> str:
     return "COUNT(DISTINCT killmail_id) AS kill_count"
 
 
+def _bin_expr(day_col: str, bins_ph: str, earliest_ph: str) -> str:
+    """SQL expression bucketing ``day_col`` (a date) into one of ``bins`` equal-width
+    bins over the fixed axis [earliest, CURRENT_DATE]. ``bins_ph``/``earliest_ph`` are
+    ``$N`` placeholder strings supplied by the caller. Shared by the unfiltered
+    (rollup ``day``) and filtered (``killmail_time::date``) global-kills paths so
+    their bin boundaries are identical."""
+    return (
+        f"LEAST({bins_ph} - 1, "
+        f"GREATEST(0, floor(({day_col} - {earliest_ph}::date) * {bins_ph} "
+        f"/ GREATEST(1, (CURRENT_DATE - {earliest_ph}::date)))::int))"
+    )
+
+
 def _pred(cond: Condition, params: list, alias: str = "") -> str:
     """Append this condition's params and return its SQL predicate."""
     p = f"{alias}." if alias else ""
@@ -228,5 +241,55 @@ def build_system_sql(f: Filter, solar_system_id: int) -> tuple[str, list]:
         FROM kill_facets f
         WHERE {where} AND {system_clause}
             AND {exists_sql}
+        """
+    return sql, params
+
+
+def build_global_kills_sql(
+    f: Filter, lo: int, hi: int, bins: int, earliest: date
+) -> tuple[str, list]:
+    params: list = []
+    if len(f.conditions) == 1:
+        where = _pred(f.conditions[0], params)
+        params.append(lo)
+        lo_ph = f"${len(params)}"
+        params.append(hi)
+        hi_ph = f"${len(params)}"
+        params.append(bins)
+        bins_ph = f"${len(params)}"
+        params.append(earliest)
+        earliest_ph = f"${len(params)}"
+        sql = f"""
+        SELECT {_bin_expr("killmail_time::date", bins_ph, earliest_ph)} AS bin,
+               COUNT(DISTINCT killmail_id) AS kill_count
+        FROM kill_facets
+        WHERE {where}
+          AND solar_system_id >= {lo_ph} AND solar_system_id < {hi_ph}
+        GROUP BY bin
+        """
+        return sql, params
+
+    driver, others = _split_driver(f)
+    where = _pred(driver, params, alias="f")
+    params.append(lo)
+    lo_ph = f"${len(params)}"
+    params.append(hi)
+    hi_ph = f"${len(params)}"
+    exists_sql = "\n            AND ".join(_exists(c, params) for c in others)
+    params.append(bins)
+    bins_ph = f"${len(params)}"
+    params.append(earliest)
+    earliest_ph = f"${len(params)}"
+    sql = f"""
+        SELECT {_bin_expr("killmail_time::date", bins_ph, earliest_ph)} AS bin,
+               COUNT(DISTINCT killmail_id) AS kill_count
+        FROM (
+          SELECT f.killmail_id, f.killmail_time
+          FROM kill_facets f
+          WHERE {where}
+            AND f.solar_system_id >= {lo_ph} AND f.solar_system_id < {hi_ph}
+            AND {exists_sql}
+        ) m
+        GROUP BY bin
         """
     return sql, params

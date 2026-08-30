@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query, Header, Depends, HTTPException
 
 from app.config import config
 from app.cache import query_cache, single_flight
-from app.global_kills import fetch_global_kills, MAP_RANGES
+from app.global_kills import fetch_global_kills, fetch_filtered_global_kills, MAP_RANGES
 from app.http_cache import json_cache_response
 from app.models import RankSystemsResponse
 from app.queries import fetch_top_systems, fetch_bottom_systems, fetch_system_kills
@@ -138,26 +138,48 @@ async def get_system_kills_stats(
     return json_cache_response(body, gzipped, etag, ttl, if_none_match)
 
 
-async def build_global_kills(map: str, bins: int) -> tuple[str, bool, bytes]:
+async def build_global_kills(
+    map: str, bins: int, flt: Filter | None
+) -> tuple[str, bool, bytes]:
     """Get-or-build-and-cache the global-kills histogram for ``map``/``bins``.
 
-    Shared by the endpoint and the leader's cache-warm cycle; both must resolve
-    to the exact same cache key, so this must stay the sole owner of the
-    ``global_kills`` prefix + params shape. Caller must have already validated
-    ``map`` against ``MAP_RANGES``.
+    Empty/absent ``flt`` serves the warmed ``global_kills`` rollup path (sole
+    owner of that prefix + params shape, shared with the leader's warm cycle).
+    A non-empty ``flt`` computes a live ``kill_facets`` histogram cached under
+    ``global_kills_filtered`` with its own TTL, mirroring ``build_system_kills``.
+    Caller must have already validated ``map`` against ``MAP_RANGES``.
     """
-    params = {"bins": bins, "map": map}
-    res = await query_cache.get("global_kills", params)
+    if flt is None or flt.is_empty:
+        prefix, ttl, lock, params = (
+            "global_kills",
+            config.cache.rankings_ttl,
+            f"global_kills:{map}:{bins}",
+            {"bins": bins, "map": map},
+        )
+
+        async def builder():
+            return await fetch_global_kills(map, bins)
+
+    else:
+        key = flt.canonical()
+        prefix, ttl, lock, params = (
+            "global_kills_filtered",
+            config.cache.filtered_map_ttl,
+            f"global_kills_filtered:{key}:{map}:{bins}",
+            {"filter": key, "map": map, "bins": bins},
+        )
+
+        async def builder():
+            return await fetch_filtered_global_kills(flt, map, bins)
+
+    res = await query_cache.get(prefix, params)
     if res is None:
-        async with single_flight.lock(f"global_kills:{map}:{bins}"):
-            res = await query_cache.get("global_kills", params)
+        async with single_flight.lock(lock):
+            res = await query_cache.get(prefix, params)
             if res is None:
-                counts = await fetch_global_kills(map, bins)
+                counts = await builder()
                 res = await query_cache.set(
-                    "global_kills",
-                    params,
-                    json.dumps(counts),
-                    ttl=config.cache.rankings_ttl,
+                    prefix, params, json.dumps(counts), ttl=ttl
                 )
     return res
 
@@ -165,17 +187,19 @@ async def build_global_kills(map: str, bins: int) -> tuple[str, bool, bytes]:
 @router.get("/stats/global-kills", response_model=None)
 async def get_global_kills(
     map: Annotated[str, Query()],
+    flt: Filter = Depends(get_filter),
     bins: Annotated[int | None, Query(ge=1, le=2000)] = None,
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ):
     """Per-map kill-count histogram over the fixed global time axis
     (EARLIEST_KILL_DATE..CURRENT_DATE), bucketed into ``bins`` equal-width bins
     (default ``config.limits.global_kills_default_bins``). Returns a bare,
-    zero-filled, dense array of ``bins`` ints, oldest to newest."""
+    zero-filled, dense array of ``bins`` ints, oldest to newest. Without ``f=``
+    this serves the warmed rollup; with ``f=`` facet filters it counts only
+    matching kills (same axis) from ``kill_facets``, cached separately."""
     if map not in MAP_RANGES:
         raise HTTPException(status_code=400, detail="unknown map type")
     n = bins if bins is not None else config.limits.global_kills_default_bins
-    etag, gzipped, body = await build_global_kills(map, n)
-    return json_cache_response(
-        body, gzipped, etag, config.cache.rankings_ttl, if_none_match
-    )
+    etag, gzipped, body = await build_global_kills(map, n, flt)
+    ttl = config.cache.rankings_ttl if flt.is_empty else config.cache.filtered_map_ttl
+    return json_cache_response(body, gzipped, etag, ttl, if_none_match)

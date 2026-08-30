@@ -14,8 +14,9 @@ def test_warm_all_builds_the_six_entries(monkeypatch):
         calls["rank"] += 1
         return ("e", False, b"[]")
 
-    async def fake_gk(m, bins):
+    async def fake_gk(m, bins, flt):
         calls["gk"].append(m)
+        assert flt is None
         return ("e", False, b"[]")
 
     monkeypatch.setattr(cw, "build_system_kills", fake_sk)

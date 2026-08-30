@@ -212,7 +212,7 @@ kills_binary_response_bytes = Histogram(
 facet_query_seconds = Histogram(
     "eve_killmap_facet_query_seconds",
     "Latency of a kill_facets filtered query, by query type.",
-    ["query"],  # map|system
+    ["query"],  # map|system|global_kills
 )
 autocomplete_requests = Counter(
     "eve_killmap_autocomplete_requests",

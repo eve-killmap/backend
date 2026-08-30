@@ -164,3 +164,43 @@ def test_map_multi_condition_window_uses_driver_alias():
     assert "f.killmail_time < $5" in sql
     assert params[3] == datetime(2026, 1, 1, tzinfo=timezone.utc)
     assert params[4] == datetime(2026, 3, 1, tzinfo=timezone.utc)
+
+
+from datetime import date as _date
+
+from app.filters import build_global_kills_sql, _bin_expr
+
+
+def test_global_kills_sql_single_condition():
+    f = parse_filter(["alliance:attacker:99005338"], **M)
+    sql, params = build_global_kills_sql(f, 30000000, 31000000, 300, _date(2015, 11, 3))
+    assert "FROM kill_facets" in sql
+    assert "GROUP BY bin" in sql
+    assert "COUNT(DISTINCT killmail_id) AS kill_count" in sql
+    assert "killmail_time::date" in sql
+    # facet params ($1..$3), then lo $4, hi $5, bins $6, earliest $7
+    assert "solar_system_id >= $4 AND solar_system_id < $5" in sql
+    assert _bin_expr("killmail_time::date", "$6", "$7") in sql
+    assert params == [3, [99005338], 1, 30000000, 31000000, 300, _date(2015, 11, 3)]
+
+
+def test_global_kills_sql_war_any_has_no_value_param():
+    f = parse_filter(["war:any"], **M)
+    sql, params = build_global_kills_sql(f, 32000000, 33000000, 10, _date(2015, 11, 3))
+    assert "facet_value" not in sql
+    # war:any: kind $1, then lo $2, hi $3, bins $4, earliest $5
+    assert _bin_expr("killmail_time::date", "$4", "$5") in sql
+    assert params == [7, 32000000, 33000000, 10, _date(2015, 11, 3)]
+
+
+def test_global_kills_sql_multi_condition_map_range_on_driver():
+    # character (rank 0) is more selective than ship (rank 4) -> character drives
+    f = parse_filter(["ship:attacker:670", "character:victim:12345"], **M)
+    sql, params = build_global_kills_sql(f, 30000000, 31000000, 300, _date(2015, 11, 3))
+    assert "FROM kill_facets f" in sql
+    assert "EXISTS (SELECT 1 FROM kill_facets g" in sql
+    assert "g.killmail_id = f.killmail_id" in sql
+    assert "f.solar_system_id >= $" in sql and "f.solar_system_id < $" in sql
+    assert "GROUP BY bin" in sql
+    # driver (character) params first: kind=1, value, role=0
+    assert params[0] == 1 and params[1] == [12345] and params[2] == 0
