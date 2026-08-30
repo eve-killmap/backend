@@ -184,17 +184,14 @@ def test_system_kills_serves_from_cache_hit(monkeypatch):
         return (
             '"sk"',
             False,
-            (
-                b'{"system_ids":[1],"all":[5],"day":[1],"week":[2],'
-                b'"month":[3],"six_months":[3],"year":[4]}'
-            ),
+            b'{"system_ids":[1],"counts":[5]}',
         )
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
     flt = parse_filter([], max_conditions=8, max_ids=50)  # empty -> unfiltered path
     resp = asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
     assert resp.status_code == 200
-    assert b'"system_ids"' in resp.body
+    assert b'"counts"' in resp.body
     assert resp.headers["ETag"] == '"sk"'
     # cached exactly like system-rankings -> same TTL
     assert (
@@ -219,15 +216,7 @@ def test_system_kills_single_flight_builds_once(monkeypatch):
     async def fake_fetch():
         calls.append(1)
         await asyncio.sleep(0.02)
-        return SystemKillsResponse(
-            system_ids=[1],
-            all=[5],
-            day=[1],
-            week=[2],
-            month=[3],
-            six_months=[3],
-            year=[4],
-        )
+        return SystemKillsResponse(system_ids=[1], counts=[5])
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
     monkeypatch.setattr(stats.query_cache, "set", fake_set)
@@ -254,7 +243,7 @@ def test_system_kills_filtered_cache_hit(monkeypatch):
         return (
             '"fk"',
             False,
-            b'{"system_ids":[1],"all":[2],"day":[0],"week":[0],"month":[0],"six_months":[0],"year":[0]}',
+            b'{"system_ids":[1],"counts":[2]}',
         )
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
@@ -274,7 +263,7 @@ def test_system_kills_unfiltered_still_uses_rankings_ttl(monkeypatch):
         return (
             '"sk"',
             False,
-            b'{"system_ids":[],"all":[],"day":[],"week":[],"month":[],"six_months":[],"year":[]}',
+            b'{"system_ids":[],"counts":[]}',
         )
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
@@ -321,3 +310,11 @@ def test_system_kills_filtered_rejects_empty_filter():
     with pytest.raises(HTTPException) as e:
         asyncio.run(systems.get_system_kills_filtered(30000142, flt=empty))
     assert e.value.status_code == 400
+
+
+def test_system_kills_response_is_single_count():
+    from app.models import SystemKillsResponse
+
+    r = SystemKillsResponse(system_ids=[1, 2], counts=[5, 0])
+    assert r.counts == [5, 0]
+    assert not hasattr(r, "day")  # six-bucket fields gone

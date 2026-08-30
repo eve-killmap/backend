@@ -48,10 +48,9 @@ async def get_system_kills_stats(
     flt: Filter = Depends(get_filter),
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ):
-    """Per-system kill counts across time windows as index-aligned columns:
-    index i of every array (all/day/week/month/six_months/year) belongs to
-    system_ids[i]. Unfiltered requests serve from the pre-computed MVs
-    (cached like /stats/system-rankings, same TTL). Filtered requests
+    """Per-system all-time kill counts as index-aligned columns: counts[i]
+    belongs to system_ids[i]. Unfiltered requests serve from the pre-computed
+    MVs (cached like /stats/system-rankings, same TTL). Filtered requests
     (``f=`` params) compute from ``kill_facets`` and cache under a separate
     prefix with their own TTL."""
     if flt.is_empty:

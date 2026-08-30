@@ -76,8 +76,7 @@ def test_map_single_condition_sql():
     sql, params = build_map_sql(f)
     assert "FROM kill_facets" in sql
     assert "GROUP BY solar_system_id" in sql
-    assert "COUNT(DISTINCT killmail_id)" in sql
-    assert "FILTER (WHERE killmail_time > now()-interval '24 hours')" in sql
+    assert "COUNT(DISTINCT killmail_id) AS kill_count" in sql
     assert "facet_value = ANY($2::bigint[])" in sql
     assert params == [3, [99005338], 1]  # kind, values, role
 

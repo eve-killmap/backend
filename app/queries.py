@@ -266,49 +266,13 @@ async def fetch_bottom_systems(limit: int = 10) -> list[RankSystem]:
 
 
 async def fetch_system_kills() -> SystemKillsResponse:
-    query = """
-        SELECT
-            a.solar_system_id            AS solar_system_id,
-            a.kill_count                 AS all_count,
-            COALESCE(d.kill_count, 0)    AS day_count,
-            COALESCE(w.kill_count, 0)    AS week_count,
-            COALESCE(m.kill_count, 0)    AS month_count,
-            COALESCE(s.kill_count, 0)    AS six_months_count,
-            COALESCE(y.kill_count, 0)    AS year_count
-        FROM mv_kills_per_system a
-        LEFT JOIN mv_kills_per_system_24h d ON d.solar_system_id = a.solar_system_id
-        LEFT JOIN mv_kills_per_system_7d  w ON w.solar_system_id = a.solar_system_id
-        LEFT JOIN mv_kills_per_system_30d m ON m.solar_system_id = a.solar_system_id
-        LEFT JOIN mv_kills_per_system_6m  s ON s.solar_system_id = a.solar_system_id
-        LEFT JOIN mv_kills_per_system_1y  y ON y.solar_system_id = a.solar_system_id
-        ORDER BY a.solar_system_id
-    """
-    rows = await db.fetch(query)
-
-    system_ids: list[int] = []
-    all_counts: list[int] = []
-    day: list[int] = []
-    week: list[int] = []
-    month: list[int] = []
-    six_months: list[int] = []
-    year: list[int] = []
-    for row in rows:
-        system_ids.append(row["solar_system_id"])
-        all_counts.append(row["all_count"])
-        day.append(row["day_count"])
-        week.append(row["week_count"])
-        month.append(row["month_count"])
-        six_months.append(row["six_months_count"])
-        year.append(row["year_count"])
-
+    rows = await db.fetch(
+        "SELECT solar_system_id, kill_count FROM mv_kills_per_system "
+        "ORDER BY solar_system_id"
+    )
     return SystemKillsResponse(
-        system_ids=system_ids,
-        all=all_counts,
-        day=day,
-        week=week,
-        month=month,
-        six_months=six_months,
-        year=year,
+        system_ids=[r["solar_system_id"] for r in rows],
+        counts=[r["kill_count"] for r in rows],
     )
 
 

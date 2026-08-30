@@ -108,27 +108,10 @@ def parse_filter(raw: list[str], *, max_conditions: int, max_ids: int) -> Filter
 # lower rank = more selective -> better driver. Tunable.
 DRIVER_RANK = {1: 0, 2: 1, 3: 2, 6: 3, 5: 4, 4: 5, 7: 6}
 
-_BUCKETS = (
-    ("all_count", None),
-    ("day_count", "24 hours"),
-    ("week_count", "7 days"),
-    ("month_count", "30 days"),
-    ("six_months_count", "6 months"),
-    ("year_count", "1 year"),
-)
-
 
 def _bucket_sql(time_col: str) -> str:
-    lines = []
-    for alias, interval in _BUCKETS:
-        if interval is None:
-            lines.append(f"COUNT(DISTINCT killmail_id) AS {alias}")
-        else:
-            lines.append(
-                f"COUNT(DISTINCT killmail_id) "
-                f"FILTER (WHERE {time_col} > now()-interval '{interval}') AS {alias}"
-            )
-    return ",\n          ".join(lines)
+    # single all-time count; the window predicate (Task 3) narrows the WHERE, not this.
+    return "COUNT(DISTINCT killmail_id) AS kill_count"
 
 
 def _pred(cond: Condition, params: list, alias: str = "") -> str:
