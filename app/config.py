@@ -55,6 +55,8 @@ class CorsConfig:
 class DatabaseConfig:
     pool_min_size: int
     pool_max_size: int
+    connect_max_retry_seconds: int
+    connect_retry_max_delay_seconds: int
 
 
 @dataclass(frozen=True)
@@ -271,6 +273,16 @@ def load_config(
         ),
         pool_max_size=_as_int(
             db_cfg.get("pool_max_size", 20), "database.pool_max_size", minimum=1
+        ),
+        connect_max_retry_seconds=_as_int(
+            db_cfg.get("connect_max_retry_seconds", 60),
+            "database.connect_max_retry_seconds",
+            minimum=0,
+        ),
+        connect_retry_max_delay_seconds=_as_int(
+            db_cfg.get("connect_retry_max_delay_seconds", 10),
+            "database.connect_retry_max_delay_seconds",
+            minimum=1,
         ),
     )
     if database_config.pool_max_size < database_config.pool_min_size:

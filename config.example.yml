@@ -32,6 +32,12 @@ database:
   # asyncpg connection pool sizing.
   pool_min_size: 5
   pool_max_size: 20
+  # Startup ride-out of a transient DB outage (e.g. a package-day Postgres
+  # restart): retry pool creation with exponential backoff for up to
+  # connect_max_retry_seconds (0 = no retry), each sleep capped at
+  # connect_retry_max_delay_seconds, then fail loudly.
+  connect_max_retry_seconds: 60
+  connect_retry_max_delay_seconds: 10
 
 cache:
   # All values are TTLs in seconds for the Redis cache layer.
