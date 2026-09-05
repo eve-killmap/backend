@@ -30,7 +30,10 @@ def test_sov_serves_from_cache_hit(monkeypatch):
     assert resp.status_code == 200
     assert resp.body == b'{"claimed":false}'
     assert resp.headers["ETag"] == '"deadbeef"'
-    assert resp.headers["Cache-Control"] == "public, no-cache"
+    assert (
+        resp.headers["Cache-Control"]
+        == f"public, max-age={systems.config.cache.sov_max_age}"
+    )
 
 
 def test_sov_single_flight_builds_once(monkeypatch):
@@ -170,7 +173,10 @@ def test_farthest_kill_304_on_matching_etag(monkeypatch):
     monkeypatch.setattr(systems.query_cache, "get", fake_get)
     resp = asyncio.run(systems.get_farthest_kill(30000142, if_none_match='"far"'))
     assert resp.status_code == 304
-    assert resp.headers["Cache-Control"] == "public, no-cache"
+    assert (
+        resp.headers["Cache-Control"]
+        == f"public, max-age={systems.config.cache.farthest_kill_max_age}"
+    )
 
 
 def test_system_kills_serves_from_cache_hit(monkeypatch):

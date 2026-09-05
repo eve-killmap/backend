@@ -221,7 +221,7 @@ async def get_system_sov(
                 )
     etag, gzipped, body = res
     return json_cache_response(
-        body, gzipped, etag, config.cache.sov_ttl, if_none_match, revalidate=True
+        body, gzipped, etag, config.cache.sov_max_age, if_none_match
     )
 
 
@@ -250,10 +250,5 @@ async def get_farthest_kill(
                 )
     etag, gzipped, body = res
     return json_cache_response(
-        body,
-        gzipped,
-        etag,
-        config.cache.farthest_kill_ttl,
-        if_none_match,
-        revalidate=True,
+        body, gzipped, etag, config.cache.farthest_kill_max_age, if_none_match
     )

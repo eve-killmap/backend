@@ -60,6 +60,10 @@ cache:
   war_details_ttl: 21600    # /wars/details per-id cache (6h)
   esi_sov_structures_fallback_ttl: 3600  # sov structures (ADM) when no Expires header (1h)
   sov_map_ttl: 3600                      # /universe/sov response
+  # Browser/edge max-age for slow-changing sov + farthest_kill (decoupled from the
+  # server cache TTLs above; bounds client staleness without per-request revalidation).
+  sov_max_age: 900                       # sov + sov_map browser max-age (~15m)
+  farthest_kill_max_age: 3600            # farthest_kill browser max-age (1h)
   warm_on_signal: true   # proactively warm MV-derived defaults on the leader
 
 cache_redis:

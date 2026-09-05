@@ -80,6 +80,8 @@ class CacheConfig:
     war_search_ttl: int
     war_details_ttl: int
     sov_map_ttl: int
+    sov_max_age: int
+    farthest_kill_max_age: int
     warm_on_signal: bool
 
 
@@ -359,6 +361,14 @@ def load_config(
         ),
         sov_map_ttl=_as_int(
             cache_cfg.get("sov_map_ttl", 3600), "cache.sov_map_ttl", minimum=1
+        ),
+        sov_max_age=_as_int(
+            cache_cfg.get("sov_max_age", 900), "cache.sov_max_age", minimum=0
+        ),
+        farthest_kill_max_age=_as_int(
+            cache_cfg.get("farthest_kill_max_age", 3600),
+            "cache.farthest_kill_max_age",
+            minimum=0,
         ),
         warm_on_signal=cache_warm_on_signal,
     )
