@@ -490,7 +490,7 @@ def load_config(
     if not isinstance(metrics_enabled, bool):
         raise ConfigError("Config value 'metrics.enabled' must be a boolean")
 
-    metrics_host = metrics_cfg.get("host") or "127.0.0.1"
+    metrics_host = env.get("METRICS_HOST") or "127.0.0.1"
 
     metrics_port_env = env.get("METRICS_PORT")
     if metrics_port_env:
@@ -501,8 +501,8 @@ def load_config(
                 f"METRICS_PORT must be an integer, got {metrics_port_env!r}"
             )
     else:
-        metrics_port_value = metrics_cfg.get("port", 9109)
-    metrics_port = _as_int(metrics_port_value, "metrics.port", minimum=1, maximum=65535)
+        metrics_port_value = 9109
+    metrics_port = _as_int(metrics_port_value, "METRICS_PORT", minimum=1, maximum=65535)
 
     metrics_config = MetricsConfig(
         enabled=metrics_enabled, host=metrics_host, port=metrics_port

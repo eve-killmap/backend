@@ -251,25 +251,28 @@ def test_metrics_port_env_override(tmp_path):
     assert cfg.metrics.port == 9101  # coerced str -> int
 
 
-def test_metrics_port_yaml(tmp_path):
+def test_metrics_port_yaml_ignored(tmp_path):
+    # config.yml metrics.port is no longer read; METRICS_PORT env is the only source.
     yaml_path = _write_yaml(tmp_path, "metrics:\n  port: 9200\n")
     cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
-    assert cfg.metrics.port == 9200
+    assert cfg.metrics.port == 9109  # default; yaml value ignored
 
 
-def test_metrics_env_beats_yaml(tmp_path):
-    yaml_path = _write_yaml(tmp_path, "metrics:\n  port: 9200\n")
+def test_metrics_host_env_override(tmp_path):
     cfg = load_config(
-        yaml_path=yaml_path, env={"METRICS_PORT": "9102"}, base_dir=tmp_path
+        yaml_path=tmp_path / "x.yml",
+        env={"METRICS_HOST": "10.0.0.9"},
+        base_dir=tmp_path,
     )
-    assert cfg.metrics.port == 9102
+    assert cfg.metrics.host == "10.0.0.9"
 
 
-def test_metrics_enabled_and_host_from_yaml(tmp_path):
+def test_metrics_enabled_from_yaml_but_host_ignored(tmp_path):
+    # enabled still comes from config.yml; host does not (env-only now).
     yaml_path = _write_yaml(tmp_path, "metrics:\n  enabled: true\n  host: 10.0.0.5\n")
     cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
     assert cfg.metrics.enabled is True
-    assert cfg.metrics.host == "10.0.0.5"
+    assert cfg.metrics.host == "127.0.0.1"  # yaml metrics.host ignored
 
 
 def test_metrics_port_invalid_env_raises(tmp_path):

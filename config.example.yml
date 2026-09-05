@@ -107,10 +107,8 @@ limits:
   global_kills_default_bins: 300
 
 metrics:
-  # Expose a Prometheus scrape endpoint (/metrics) on host:port. Off by default
-  # (enabling opens a listening socket). Application-level metrics only; Postgres
-  # and redis internals come from a separate DB exporter.
+  # Expose a Prometheus scrape endpoint (/metrics). Off by default (enabling
+  # opens a listening socket). Application-level metrics only; Postgres and redis
+  # internals come from a separate DB exporter. The listen host:port are set in
+  # .env (METRICS_HOST, METRICS_PORT; defaults 127.0.0.1:9109).
   enabled: false
-  host: 0.0.0.0
-  # Usually set via METRICS_PORT in .env instead.
-  #port: 9108
