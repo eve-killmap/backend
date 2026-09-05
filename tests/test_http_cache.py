@@ -22,6 +22,38 @@ def test_not_modified_matches():
     assert not_modified('"nope"', etag) is False
 
 
+def test_not_modified_weak_comparison():
+    # RFC 7232 §3.2: If-None-Match uses *weak* comparison. A reverse proxy that
+    # gzips a response weakens the ETag (nginx sends W/"..."), and the browser
+    # then revalidates with that weak tag -- it must still match our strong one.
+    assert not_modified('W/"abc"', '"abc"') is True
+    assert not_modified('"abc"', '"abc"') is True
+    assert not_modified('W/"abc"', 'W/"abc"') is True
+    assert not_modified('"nope"', '"abc"') is False
+
+
+def test_not_modified_list_and_star():
+    assert not_modified('"x", W/"abc"', '"abc"') is True  # any tag in the list matches
+    assert not_modified("*", '"abc"') is True  # * matches any current representation
+    assert not_modified(None, '"abc"') is False
+
+
+def test_json_cache_response_304_on_weak_if_none_match():
+    # End-to-end: the weakened conditional nginx forwards still yields a 304.
+    body = b'{"a":1}'
+    etag = compute_etag(body)  # strong: '"<md5>"'
+    resp = json_cache_response(
+        body,
+        gzipped=True,
+        etag=etag,
+        max_age=60,
+        if_none_match="W/" + etag,
+        revalidate=True,
+    )
+    assert resp.status_code == 304
+    assert resp.headers["ETag"] == etag
+
+
 # Vary is set by the helper ONLY when it sets Content-Encoding itself. For an
 # uncompressed body, GZipMiddleware compresses it downstream and adds its own
 # Vary: Accept-Encoding — setting it here too would duplicate the header.

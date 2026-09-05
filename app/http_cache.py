@@ -9,8 +9,19 @@ def compute_etag(body: bytes) -> str:
     return '"' + hashlib.md5(body).hexdigest() + '"'
 
 
+def _opaque_tag(tag: str) -> str:
+    tag = tag.strip()
+    return tag[2:] if tag.startswith("W/") else tag
+
+
 def not_modified(if_none_match: str | None, etag: str) -> bool:
-    return if_none_match is not None and if_none_match.strip() == etag
+    if if_none_match is None:
+        return False
+    candidates = if_none_match.split(",")
+    if any(c.strip() == "*" for c in candidates):
+        return True
+    target = _opaque_tag(etag)
+    return any(_opaque_tag(c) == target for c in candidates)
 
 
 # We set Vary: Accept-Encoding ONLY when we set Content-Encoding ourselves.
