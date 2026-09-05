@@ -371,6 +371,31 @@ def test_top_systems_windowed_intervals_use_rollup(monkeypatch):
     assert "CURRENT_DATE - INTERVAL '7 days'" in joined
 
 
+def test_rankings_order_by_has_stable_tiebreaker(monkeypatch):
+    # Ties in kill_count must break deterministically (by solar_system_id) so a
+    # rebuild can't reshuffle equal rows and churn the response ETag.
+    import asyncio
+    import app.queries as q
+
+    seen = []
+
+    class _FakeDb:
+        async def fetch(self, sql, *a):
+            seen.append(sql)
+            return []
+
+    monkeypatch.setattr(q, "db", _FakeDb())
+    asyncio.run(q.fetch_top_systems(limit=10))
+    asyncio.run(q.fetch_bottom_systems(limit=10))
+
+    order_bys = [s for s in seen if "ORDER BY" in s]
+    assert order_bys  # sanity: the ranking queries do order
+    for sql in order_bys:
+        clause = sql.split("ORDER BY", 1)[1]
+        assert "kill_count" in clause
+        assert "solar_system_id" in clause  # secondary sort makes the order stable
+
+
 def _empty_filter():
     return parse_filter([], max_conditions=8, max_ids=50)
 

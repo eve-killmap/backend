@@ -215,7 +215,7 @@ async def fetch_top_systems(limit: int = 10) -> TopSystems:
     async def _all():
         return await db.fetch(
             "SELECT solar_system_id, kill_count FROM mv_kills_per_system "
-            "ORDER BY kill_count DESC LIMIT $1",
+            "ORDER BY kill_count DESC, solar_system_id LIMIT $1",
             limit,
         )
 
@@ -226,7 +226,7 @@ async def fetch_top_systems(limit: int = 10) -> TopSystems:
             "SELECT solar_system_id, SUM(kill_count) AS kill_count "
             "FROM mv_kills_per_system_daily "
             f"WHERE day > CURRENT_DATE - INTERVAL '{iv}' "
-            "GROUP BY solar_system_id ORDER BY kill_count DESC LIMIT $1",
+            "GROUP BY solar_system_id ORDER BY kill_count DESC, solar_system_id LIMIT $1",
             limit,
         )
 
@@ -256,7 +256,7 @@ async def fetch_bottom_systems(limit: int = 10) -> list[RankSystem]:
             kill_count
         FROM mv_kills_per_system
         WHERE solar_system_id < 32000001
-        ORDER BY kill_count ASC
+        ORDER BY kill_count ASC, solar_system_id
         LIMIT $1
     """
     rows = await db.fetch(query, limit)
