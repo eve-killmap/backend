@@ -248,5 +248,5 @@ async def get_sovereignty_map(
                 )
     etag, gzipped, body = res
     return json_cache_response(
-        body, gzipped, etag, config.cache.sov_map_ttl, if_none_match
+        body, gzipped, etag, config.cache.sov_map_ttl, if_none_match, revalidate=True
     )

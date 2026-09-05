@@ -2,7 +2,6 @@ import asyncio
 
 import app.routers.stats as stats
 import app.routers.systems as systems
-from app.config import config
 from app.cache import QueryCache
 from app.filters import parse_filter
 
@@ -31,7 +30,7 @@ def test_sov_serves_from_cache_hit(monkeypatch):
     assert resp.status_code == 200
     assert resp.body == b'{"claimed":false}'
     assert resp.headers["ETag"] == '"deadbeef"'
-    assert resp.headers["Cache-Control"] == f"public, max-age={config.cache.sov_ttl}"
+    assert resp.headers["Cache-Control"] == "public, no-cache"
 
 
 def test_sov_single_flight_builds_once(monkeypatch):
@@ -161,9 +160,7 @@ def test_rankings_serves_gzipped_when_large(monkeypatch):
     assert resp.status_code == 200
     assert resp.headers["Content-Encoding"] == "gzip"
     assert resp.headers["ETag"] == '"rank"'
-    assert (
-        resp.headers["Cache-Control"] == f"public, max-age={config.cache.rankings_ttl}"
-    )
+    assert resp.headers["Cache-Control"] == "public, no-cache"
 
 
 def test_farthest_kill_304_on_matching_etag(monkeypatch):
@@ -173,10 +170,7 @@ def test_farthest_kill_304_on_matching_etag(monkeypatch):
     monkeypatch.setattr(systems.query_cache, "get", fake_get)
     resp = asyncio.run(systems.get_farthest_kill(30000142, if_none_match='"far"'))
     assert resp.status_code == 304
-    assert (
-        resp.headers["Cache-Control"]
-        == f"public, max-age={config.cache.farthest_kill_ttl}"
-    )
+    assert resp.headers["Cache-Control"] == "public, no-cache"
 
 
 def test_system_kills_serves_from_cache_hit(monkeypatch):
@@ -194,9 +188,7 @@ def test_system_kills_serves_from_cache_hit(monkeypatch):
     assert b'"counts"' in resp.body
     assert resp.headers["ETag"] == '"sk"'
     # cached exactly like system-rankings -> same TTL
-    assert (
-        resp.headers["Cache-Control"] == f"public, max-age={config.cache.rankings_ttl}"
-    )
+    assert resp.headers["Cache-Control"] == "public, no-cache"
 
 
 def test_system_kills_single_flight_builds_once(monkeypatch):
@@ -251,13 +243,13 @@ def test_system_kills_filtered_cache_hit(monkeypatch):
     resp = asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
     assert resp.status_code == 200
     assert resp.headers["ETag"] == '"fk"'
-    assert (
-        resp.headers["Cache-Control"]
-        == f"public, max-age={stats.config.cache.filtered_map_ttl}"
-    )
+    assert resp.headers["Cache-Control"] == "public, no-cache"
 
 
-def test_system_kills_unfiltered_still_uses_rankings_ttl(monkeypatch):
+def test_system_kills_unfiltered_revalidates(monkeypatch):
+    # Both the unfiltered (invalidation-driven) and filtered paths tell the
+    # browser to revalidate; the server-side TTL still differs by prefix, but
+    # that's internal and no longer exposed via Cache-Control.
     async def fake_get(prefix, params):
         assert prefix == "system_kills"
         return (
@@ -269,10 +261,7 @@ def test_system_kills_unfiltered_still_uses_rankings_ttl(monkeypatch):
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
     flt = parse_filter([], max_conditions=8, max_ids=50)  # empty
     resp = asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
-    assert (
-        resp.headers["Cache-Control"]
-        == f"public, max-age={stats.config.cache.rankings_ttl}"
-    )
+    assert resp.headers["Cache-Control"] == "public, no-cache"
 
 
 def test_system_kills_filtered_endpoint(monkeypatch):

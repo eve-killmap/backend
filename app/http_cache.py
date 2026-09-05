@@ -22,10 +22,13 @@ def json_cache_response(
     etag: str,
     max_age: int,
     if_none_match: str | None,
+    *,
+    revalidate: bool = False,
 ) -> Response:
+    cache_control = "public, no-cache" if revalidate else f"public, max-age={max_age}"
     headers = {
         "ETag": etag,
-        "Cache-Control": f"public, max-age={max_age}",
+        "Cache-Control": cache_control,
     }
     if gzipped:
         headers["Vary"] = "Accept-Encoding"

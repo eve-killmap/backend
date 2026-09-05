@@ -220,7 +220,9 @@ async def get_system_sov(
                     ttl=config.cache.sov_ttl,
                 )
     etag, gzipped, body = res
-    return json_cache_response(body, gzipped, etag, config.cache.sov_ttl, if_none_match)
+    return json_cache_response(
+        body, gzipped, etag, config.cache.sov_ttl, if_none_match, revalidate=True
+    )
 
 
 @router.get("/systems/{solar_system_id}/farthest_kill", response_model=None)
@@ -248,5 +250,10 @@ async def get_farthest_kill(
                 )
     etag, gzipped, body = res
     return json_cache_response(
-        body, gzipped, etag, config.cache.farthest_kill_ttl, if_none_match
+        body,
+        gzipped,
+        etag,
+        config.cache.farthest_kill_ttl,
+        if_none_match,
+        revalidate=True,
     )

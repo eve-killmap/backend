@@ -82,9 +82,7 @@ def test_global_kills_endpoint_cache_hit(monkeypatch):
     assert resp.status_code == 200
     assert resp.body == b"[1,2,3]"
     assert resp.headers["ETag"] == '"gk"'
-    assert (
-        resp.headers["Cache-Control"] == f"public, max-age={config.cache.rankings_ttl}"
-    )
+    assert resp.headers["Cache-Control"] == "public, no-cache"
 
 
 def test_global_kills_endpoint_single_flight_builds_once_default_bins(monkeypatch):
@@ -193,10 +191,7 @@ def test_global_kills_endpoint_filtered_uses_filtered_prefix(monkeypatch):
     assert seen["prefix"] == "global_kills_filtered"
     assert seen["params"] == {"filter": f.canonical(), "map": "new-eden", "bins": 10}
     assert resp.status_code == 200
-    assert (
-        resp.headers["Cache-Control"]
-        == f"public, max-age={config.cache.filtered_map_ttl}"
-    )
+    assert resp.headers["Cache-Control"] == "public, no-cache"
 
 
 def test_global_kills_endpoint_filtered_builds_and_caches(monkeypatch):

@@ -61,7 +61,7 @@ async def get_system_rankings(
     """Get rank list of solar systems by highest/lowest number of kills."""
     etag, gzipped, body = await build_system_rankings(limit)
     return json_cache_response(
-        body, gzipped, etag, config.cache.rankings_ttl, if_none_match
+        body, gzipped, etag, config.cache.rankings_ttl, if_none_match, revalidate=True
     )
 
 
@@ -135,7 +135,9 @@ async def get_system_kills_stats(
     own TTL."""
     etag, gzipped, body = await build_system_kills(start, end, flt)
     ttl = config.cache.rankings_ttl if flt.is_empty else config.cache.filtered_map_ttl
-    return json_cache_response(body, gzipped, etag, ttl, if_none_match)
+    return json_cache_response(
+        body, gzipped, etag, ttl, if_none_match, revalidate=True
+    )
 
 
 async def build_global_kills(
@@ -202,4 +204,6 @@ async def get_global_kills(
     n = bins if bins is not None else config.limits.global_kills_default_bins
     etag, gzipped, body = await build_global_kills(map, n, flt)
     ttl = config.cache.rankings_ttl if flt.is_empty else config.cache.filtered_map_ttl
-    return json_cache_response(body, gzipped, etag, ttl, if_none_match)
+    return json_cache_response(
+        body, gzipped, etag, ttl, if_none_match, revalidate=True
+    )

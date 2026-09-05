@@ -64,10 +64,7 @@ def test_adm_feed_absent_yields_adm_available_false(monkeypatch):
     resp = asyncio.run(uni.get_sovereignty_map(if_none_match=None))
     assert resp.status_code == 200
     assert b'"adm_available":false' in resp.body
-    assert (
-        resp.headers["Cache-Control"]
-        == f"public, max-age={uni.config.cache.sov_map_ttl}"
-    )
+    assert resp.headers["Cache-Control"] == "public, no-cache"
 
 
 def test_cache_hit_does_not_touch_esi(monkeypatch):

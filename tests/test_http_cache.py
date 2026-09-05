@@ -74,6 +74,41 @@ def test_json_cache_response_304_gzipped_carries_vary():
     assert "Content-Encoding" not in resp.headers  # 304 has no body
 
 
+def test_json_cache_response_revalidate_sends_no_cache():
+    # Invalidation-driven endpoints must force the browser to revalidate via
+    # ETag, so a server-side cache flush reaches it immediately. max_age is
+    # ignored in this mode (a browser max-age would hide the invalidation).
+    body = b'{"a":1}'
+    etag = compute_etag(body)
+    resp = json_cache_response(
+        body,
+        gzipped=False,
+        etag=etag,
+        max_age=3600,
+        if_none_match=None,
+        revalidate=True,
+    )
+    assert resp.status_code == 200
+    assert resp.body == body
+    assert resp.headers["ETag"] == etag
+    assert resp.headers["Cache-Control"] == "public, no-cache"
+
+
+def test_json_cache_response_revalidate_304_still_no_cache():
+    body = b'{"a":1}'
+    etag = compute_etag(body)
+    resp = json_cache_response(
+        body,
+        gzipped=False,
+        etag=etag,
+        max_age=3600,
+        if_none_match=etag,
+        revalidate=True,
+    )
+    assert resp.status_code == 304
+    assert resp.headers["Cache-Control"] == "public, no-cache"
+
+
 def test_binary_cache_response_uncompressed_omits_vary():
     body = b"\x00\x01\x02"
     resp = binary_cache_response(body, gzipped=False, max_age=300, fresh_to=1700000000)
