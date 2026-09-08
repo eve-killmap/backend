@@ -159,6 +159,20 @@ sov_refreshes = Counter(
     "Sov-map refresh cycles at the leader, by outcome.",
     ["outcome"],  # ok|error|degraded
 )
+esi_feed_refreshes = Counter(
+    "eve_killmap_esi_feed_refreshes",
+    "ESI feed refresh cycles at the leader, by feed and outcome.",
+    ["feed", "outcome"],  # ok|degraded|offline|error
+)
+esi_feed_last_success_timestamp_seconds = Gauge(
+    "eve_killmap_esi_feed_last_success_timestamp_seconds",
+    "Unix time of the last refresh that produced a value, by feed.",
+    ["feed"],
+)
+esi_error_limit_remain = Gauge(
+    "eve_killmap_esi_error_limit_remain",
+    "Errors remaining in ESI's current error-limit window (X-ESI-Error-Limit-Remain).",
+)
 stream_entries_read = Counter(
     "eve_killmap_stream_entries_read",
     "Kill stream entries read by the leader.",

@@ -92,3 +92,25 @@ def test_instrument_app_does_not_raise():
     from fastapi import FastAPI
 
     pm.instrument_app(FastAPI())  # attaches middleware; must not raise
+
+
+def test_esi_feed_metrics_exist_and_increment():
+    for outcome in ("ok", "degraded", "offline", "error"):
+        pm.esi_feed_refreshes.labels(feed="sov", outcome=outcome).inc()
+    assert (
+        REGISTRY.get_sample_value(
+            "eve_killmap_esi_feed_refreshes_total", {"feed": "sov", "outcome": "ok"}
+        )
+        >= 1
+    )
+
+    pm.esi_feed_last_success_timestamp_seconds.labels(feed="sov").set_to_current_time()
+    assert (
+        REGISTRY.get_sample_value(
+            "eve_killmap_esi_feed_last_success_timestamp_seconds", {"feed": "sov"}
+        )
+        > 0
+    )
+
+    pm.esi_error_limit_remain.set(87)
+    assert REGISTRY.get_sample_value("eve_killmap_esi_error_limit_remain") == 87
