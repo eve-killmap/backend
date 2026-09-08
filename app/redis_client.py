@@ -497,10 +497,12 @@ class KillBroadcaster:
                 pass
 
     def _dispatch(self, channel: str, payload: dict) -> None:
-        if channel == config.streaming.status_channel:
+        if channel == config.streaming.pubsub_channel:
+            self._fanout(payload)
+        elif channel == config.streaming.status_channel:
             self._fanout_status(payload)
         else:
-            self._fanout(payload)
+            logger.warning("Broadcaster: dropping message from channel %s", channel)
 
     def _push(self, subs: set[asyncio.Queue], payload: dict) -> set[asyncio.Queue]:
         """Deliver to every queue; return those that were full, so the caller can

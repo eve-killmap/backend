@@ -37,7 +37,7 @@ def test_status_fanout_does_not_touch_kill_subscribers():
         broadcaster.unsubscribe_status(sq)
 
 
-def test_dispatch_routes_by_channel(monkeypatch):
+def _count_fanouts(monkeypatch) -> dict[str, int]:
     seen = {"kills": 0, "status": 0}
     monkeypatch.setattr(
         rc.broadcaster, "_fanout", lambda p: seen.__setitem__("kills", seen["kills"] + 1)
@@ -47,9 +47,23 @@ def test_dispatch_routes_by_channel(monkeypatch):
         "_fanout_status",
         lambda p: seen.__setitem__("status", seen["status"] + 1),
     )
+    return seen
+
+
+def test_dispatch_routes_by_channel(monkeypatch):
+    seen = _count_fanouts(monkeypatch)
     rc.broadcaster._dispatch(rc.config.streaming.pubsub_channel, {"solar_system_id": 1})
     rc.broadcaster._dispatch(rc.config.streaming.status_channel, {"online": True})
     assert seen == {"kills": 1, "status": 1}
+
+
+def test_dispatch_drops_unknown_channel(monkeypatch):
+    """Routing must fail closed. An unrecognized payload reaching the kill fan-out
+    would raise on its missing solar_system_id, and the subscriber loop does not
+    restart, so delivery would end for the kill and status sockets alike."""
+    seen = _count_fanouts(monkeypatch)
+    rc.broadcaster._dispatch(rc.config.streaming.invalidate_channel, {"targets": []})
+    assert seen == {"kills": 0, "status": 0}
 
 
 class _FakePubSub:

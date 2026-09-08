@@ -296,9 +296,6 @@ class EsiClient:
     async def get_sov_structures_cached(self) -> dict[int, dict] | None:
         return await self.get_cached(SOV_STRUCTURES)
 
-    async def get_system_jumps_cached(self) -> dict[int, int] | None:
-        return await self.get_cached(SYSTEM_JUMPS)
-
     async def get_status_cached(self) -> dict | None:
         return await self.get_cached(STATUS)
 

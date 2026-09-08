@@ -70,7 +70,7 @@ async def _ws_guard(websocket: WebSocket) -> bool:
         return False
     if not broadcaster.is_running:
         await websocket.accept()
-        await websocket.close(code=1011, reason="Live kill streaming unavailable")
+        await websocket.close(code=1011, reason="Live streaming unavailable")
         prometheus_metrics.ws_connections.labels(
             transport="ws", outcome="unavailable"
         ).inc()
