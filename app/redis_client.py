@@ -17,7 +17,13 @@ from app.config import config
 from app.metrics import metrics
 from app import prometheus_metrics as pm
 from app import entities
-from app.esi import esi_client, EsiTransientError
+from app.esi import (
+    SOV_MAP,
+    SOV_STRUCTURES,
+    EsiFeed,
+    EsiFeedRefreshError,
+    esi_client,
+)
 from app.queries import get_type_names
 from app.timeparse import iso_to_epoch
 from app.positions import sanitize_position
@@ -27,6 +33,8 @@ logger = logging.getLogger(__name__)
 _LOCK_KEY = "kills:broadcaster:leader"
 _LOCK_TTL = 30
 _ELECTION_INTERVAL = 10
+
+LEADER_FEEDS: tuple[EsiFeed, ...] = (SOV_MAP, SOV_STRUCTURES)
 
 _RENEW_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -249,8 +257,7 @@ class KillBroadcaster:
         self._system_subs: dict[int, set[asyncio.Queue]] = {}
         self._redis: aioredis.Redis | None = None
         self._subscriber_task: asyncio.Task | None = None
-        self._leader_task: asyncio.Task | None = None
-        self._sov_task: asyncio.Task | None = None
+        self._leader_tasks: list[asyncio.Task] = []
         self._election_task: asyncio.Task | None = None
         self._is_leader: bool = False
         self._instance_id: str = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
@@ -393,8 +400,9 @@ class KillBroadcaster:
         pm.broadcaster_is_leader.set(1)
         pm.leader_promotions.inc()
         logger.info("Broadcaster: promoted to leader (instance=%s)", self._instance_id)
-        self._leader_task = asyncio.create_task(self._leader_loop())
-        self._sov_task = asyncio.create_task(self._sov_refresh_loop())
+        self._leader_tasks = [asyncio.create_task(self._leader_loop())] + [
+            asyncio.create_task(self._esi_refresh_loop(feed)) for feed in LEADER_FEEDS
+        ]
 
     async def _demote(self) -> None:
         if not self._is_leader:
@@ -409,54 +417,53 @@ class KillBroadcaster:
         await self._cancel_leader_tasks()
 
     async def _cancel_leader_tasks(self) -> None:
-        for task in (self._leader_task, self._sov_task):
-            if task is not None:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-        self._leader_task = None
-        self._sov_task = None
+        for task in self._leader_tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._leader_tasks = []
 
-    async def _sov_refresh_once(self) -> int:
-        ttl = await esi_client.refresh_sov_map()  # propagates on failure
-        adm_ttl: int | None = None
-        degraded = False
-        try:
-            adm_ttl = await esi_client.refresh_sov_structures()
-        except EsiTransientError as exc:
-            degraded = True
-            logger.info(
-                "Sov structures refresh skipped: %s; ADM serving last-known", exc
-            )
-        except Exception:
-            degraded = True
-            logger.warning(
-                "Sov structures refresh failed; ADM will fall back", exc_info=True
-            )
+    async def _esi_refresh_once(self, feed: EsiFeed) -> int:
+        """Refresh one feed, publish its side effects, and return the next sleep."""
+        ttl, value = await esi_client.refresh(feed)
+        pm.esi_feed_last_success_timestamp_seconds.labels(
+            feed=feed.name
+        ).set_to_current_time()
         if self._redis is not None:
-            await self._redis.publish(
-                config.streaming.invalidate_channel,
-                json.dumps({"targets": ["sov", "sov_map"]}),
-            )
-        pm.sov_refreshes.labels(outcome="degraded" if degraded else "ok").inc()
-        logger.info("Sov map refreshed (ttl=%ss, adm_ttl=%s)", ttl, adm_ttl)
-        # Wake for whichever feed expires first, clamped to [60s, 1h].
-        return min(max(min(ttl, adm_ttl or ttl) - 60, 60), 3600)
+            if feed.invalidate_targets:
+                await self._redis.publish(
+                    config.streaming.invalidate_channel,
+                    json.dumps({"targets": list(feed.invalidate_targets)}),
+                )
+            if feed.broadcast_channel:
+                await self._redis.publish(feed.broadcast_channel, json.dumps(value))
+        return min(max(ttl - feed.sleep_skew, feed.sleep_min), feed.sleep_max)
 
-    async def _sov_refresh_loop(self) -> None:
+    def _retry_delay(self, failures: int) -> int:
+        return min(
+            config.cache.esi_retry_initial_seconds * 2 ** (failures - 1),
+            config.cache.esi_retry_max_seconds,
+        )
+
+    async def _esi_refresh_loop(self, feed: EsiFeed) -> None:
+        failures = 0
         while True:
             try:
-                sleep_s = await self._sov_refresh_once()
-                await asyncio.sleep(sleep_s)
+                delay = await self._esi_refresh_once(feed)
+                failures = 0
             except asyncio.CancelledError:
                 raise
+            except EsiFeedRefreshError:
+                failures += 1
+                delay = self._retry_delay(failures)
             except Exception as exc:
-                pm.sov_refreshes.labels(outcome="error").inc()
+                failures += 1
                 pm.errors.labels(component="broadcaster").inc()
-                logger.warning("Sov refresh failed: %s; retrying in 60s", exc)
-                await asyncio.sleep(60)
+                logger.warning("ESI feed %s loop error: %s", feed.name, exc)
+                delay = self._retry_delay(failures)
+            await asyncio.sleep(delay)
 
     async def _subscriber_loop(self) -> None:
         assert self._redis is not None  # set in start() before task is created

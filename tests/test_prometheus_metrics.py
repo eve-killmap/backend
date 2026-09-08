@@ -44,8 +44,6 @@ def test_singletons_accept_calls():
     pm.broadcaster_is_leader.set(1)
     pm.leader_promotions.inc()
     pm.stream_read_interruptions.inc()
-    for outcome in ("ok", "error"):
-        pm.sov_refreshes.labels(outcome=outcome).inc()
     pm.stream_entries_read.inc()
     pm.live_events_pushed.inc()
     pm.stream_consumer_lag_seconds.set(1.5)

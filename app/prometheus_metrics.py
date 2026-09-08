@@ -154,11 +154,6 @@ stream_read_interruptions = Counter(
     "eve_killmap_stream_read_interruptions",
     "Redis timeout/connection interruptions in the leader stream read loop.",
 )
-sov_refreshes = Counter(
-    "eve_killmap_sov_refreshes",
-    "Sov-map refresh cycles at the leader, by outcome.",
-    ["outcome"],  # ok|error|degraded
-)
 esi_feed_refreshes = Counter(
     "eve_killmap_esi_feed_refreshes",
     "ESI feed refresh cycles at the leader, by feed and outcome.",
