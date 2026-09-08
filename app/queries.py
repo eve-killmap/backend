@@ -292,7 +292,7 @@ async def fetch_system_kills(
         )
     return SystemKillsResponse(
         system_ids=[r["solar_system_id"] for r in rows],
-        counts=[r["kill_count"] for r in rows],
+        kills=[r["kill_count"] for r in rows],
     )
 
 

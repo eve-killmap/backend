@@ -19,7 +19,7 @@ async def fetch_filtered_map(
         pm.facet_query_seconds.labels(query="map").observe(time.perf_counter() - _start)
     return SystemKillsResponse(
         system_ids=[r["solar_system_id"] for r in rows],
-        counts=[r["kill_count"] for r in rows],
+        kills=[r["kill_count"] for r in rows],
     )
 
 

@@ -143,7 +143,7 @@ class RankSystemsResponse(BaseModel):
 
 class SystemKillsResponse(BaseModel):
     system_ids: list[int]
-    counts: list[int]  # counts[i] belongs to system_ids[i]
+    kills: list[int]  # kills[i] belongs to system_ids[i]
 
 
 class SystemJumpsResponse(BaseModel):

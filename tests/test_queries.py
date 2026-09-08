@@ -99,7 +99,7 @@ class _FakeDbFetch:
 
 
 def test_fetch_system_kills_aligns_and_defaults(monkeypatch):
-    # Index i in counts must belong to system_ids[i].
+    # Index i in kills must belong to system_ids[i].
     rows = [
         {"solar_system_id": 30000142, "kill_count": 100},
         {"solar_system_id": 30002187, "kill_count": 3},
@@ -109,9 +109,9 @@ def test_fetch_system_kills_aligns_and_defaults(monkeypatch):
     result = asyncio.run(queries.fetch_system_kills())
 
     assert result.system_ids == [30000142, 30002187]
-    assert result.counts == [100, 3]
-    # counts is the same length as system_ids
-    assert len(result.counts) == len(result.system_ids)
+    assert result.kills == [100, 3]
+    # kills is the same length as system_ids
+    assert len(result.kills) == len(result.system_ids)
 
     # Guard the SQL shape that makes alignment structural.
     q = fake.query

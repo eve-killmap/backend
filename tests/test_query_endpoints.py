@@ -196,14 +196,14 @@ def test_system_kills_serves_from_cache_hit(monkeypatch):
         return (
             '"sk"',
             False,
-            b'{"system_ids":[1],"counts":[5]}',
+            b'{"system_ids":[1],"kills":[5]}',
         )
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
     flt = parse_filter([], max_conditions=8, max_ids=50)  # empty -> unfiltered path
     resp = asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
     assert resp.status_code == 200
-    assert b'"counts"' in resp.body
+    assert b'"kills"' in resp.body
     assert resp.headers["ETag"] == '"sk"'
     # cached exactly like system-rankings -> same TTL
     assert resp.headers["Cache-Control"] == "public, no-cache"
@@ -226,7 +226,7 @@ def test_system_kills_single_flight_builds_once(monkeypatch):
     async def fake_fetch(start=None, end=None):
         calls.append(1)
         await asyncio.sleep(0.02)
-        return SystemKillsResponse(system_ids=[1], counts=[5])
+        return SystemKillsResponse(system_ids=[1], kills=[5])
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
     monkeypatch.setattr(stats.query_cache, "set", fake_set)
@@ -253,7 +253,7 @@ def test_system_kills_filtered_cache_hit(monkeypatch):
         return (
             '"fk"',
             False,
-            b'{"system_ids":[1],"counts":[2]}',
+            b'{"system_ids":[1],"kills":[2]}',
         )
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
@@ -273,7 +273,7 @@ def test_system_kills_unfiltered_revalidates(monkeypatch):
         return (
             '"sk"',
             False,
-            b'{"system_ids":[],"counts":[]}',
+            b'{"system_ids":[],"kills":[]}',
         )
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
@@ -322,8 +322,8 @@ def test_system_kills_filtered_rejects_empty_filter():
 def test_system_kills_response_is_single_count():
     from app.models import SystemKillsResponse
 
-    r = SystemKillsResponse(system_ids=[1, 2], counts=[5, 0])
-    assert r.counts == [5, 0]
+    r = SystemKillsResponse(system_ids=[1, 2], kills=[5, 0])
+    assert r.kills == [5, 0]
     assert not hasattr(r, "day")  # six-bucket fields gone
 
 

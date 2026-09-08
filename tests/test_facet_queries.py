@@ -26,7 +26,7 @@ def test_fetch_filtered_map_builds_columns(monkeypatch):
     f = parse_filter(["alliance:attacker:99005338"], max_conditions=8, max_ids=50)
     result = asyncio.run(fq.fetch_filtered_map(f))
     assert result.system_ids == [30000142, 30002187]
-    assert result.counts == [10, 4]
+    assert result.kills == [10, 4]
     assert "kill_facets" in fake.query
 
 

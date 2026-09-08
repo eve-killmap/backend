@@ -127,7 +127,7 @@ async def get_system_kills_stats(
     ] = None,
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ):
-    """Per-system kill counts as index-aligned columns: counts[i] belongs to
+    """Per-system kill counts as index-aligned columns: kills[i] belongs to
     system_ids[i]. All-time by default; ``start``/``end`` restrict to a
     day-aligned, half-open UTC window ``[start, end)`` (either independently
     optional). Unfiltered requests serve from the pre-computed MVs (cached
