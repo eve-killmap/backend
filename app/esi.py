@@ -296,6 +296,9 @@ class EsiClient:
     async def get_sov_structures_cached(self) -> dict[int, dict] | None:
         return await self.get_cached(SOV_STRUCTURES)
 
+    async def get_system_jumps_cached(self) -> dict[int, int] | None:
+        return await self.get_cached(SYSTEM_JUMPS)
+
 
 SOV_MAP = EsiFeed(
     name="sov",
@@ -328,6 +331,21 @@ SOV_STRUCTURES = EsiFeed(
     store_ttl=lambda: 7200,
     invalidate_targets=("sov", "sov_map"),
     required=False,
+)
+
+SYSTEM_JUMPS = EsiFeed(
+    name="system_jumps",
+    path="/universe/system_jumps/",
+    redis_key="esi:system_jumps",
+    fallback_ttl=lambda: config.cache.esi_system_jumps_fallback_ttl,
+    ttl_floor=60,
+    transform=lambda data: {str(i["system_id"]): i["ship_jumps"] for i in data},
+    decode=_int_keyed,
+    sleep_skew=60,
+    sleep_min=60,
+    sleep_max=3600,
+    store_ttl=lambda: 7200,
+    invalidate_targets=("system_jumps",),
 )
 
 

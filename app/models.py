@@ -146,6 +146,15 @@ class SystemKillsResponse(BaseModel):
     counts: list[int]  # counts[i] belongs to system_ids[i]
 
 
+class SystemJumpsResponse(BaseModel):
+    system_ids: list[int]
+    jumps: list[int]  # jumps[i] belongs to system_ids[i]
+
+
+class SystemJumpCount(BaseModel):
+    jumps: int
+
+
 class SystemKillIdsResponse(BaseModel):
     count: int
     killmail_ids: list[int]

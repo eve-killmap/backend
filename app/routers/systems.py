@@ -14,13 +14,18 @@ from app.cache import (
     should_short_circuit,
     get_system_latest,
 )
-from app.http_cache import json_cache_response, binary_cache_response
+from app.http_cache import json_cache_response, binary_cache_response, compute_etag
 from app.binary_encoder import encode_kills_binary
 from app.positions import sanitize_position
-from app.esi import esi_client
+from app.esi import SYSTEM_JUMPS, esi_client
 from app import prometheus_metrics
 from app.queries import fetch_raw_kills, fetch_farthest_kill, normalize_farthest_kill
-from app.models import SovResponse, GroupInfo, FarthestKillResponse
+from app.models import (
+    SovResponse,
+    GroupInfo,
+    FarthestKillResponse,
+    SystemJumpCount,
+)
 from app.routers.dependencies import get_filter
 from app.filters import Filter
 from app.facet_queries import fetch_filtered_system_kill_ids
@@ -222,6 +227,29 @@ async def get_system_sov(
     etag, gzipped, body = res
     return json_cache_response(
         body, gzipped, etag, config.cache.sov_max_age, if_none_match
+    )
+
+
+@router.get("/systems/{solar_system_id}/jumps", response_model=None)
+async def get_system_jumps(
+    solar_system_id: int,
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
+):
+    """Ship jumps through this system over the past hour (ESI, refreshed hourly).
+
+    Systems ESI omits had no jumps and report 0."""
+    jumps = await esi_client.get_cached(SYSTEM_JUMPS)
+    if jumps is None:
+        raise HTTPException(status_code=503, detail="jump data warming up")
+    body = (
+        SystemJumpCount(jumps=jumps.get(solar_system_id, 0)).model_dump_json().encode()
+    )
+    return json_cache_response(
+        body,
+        False,
+        compute_etag(body),
+        config.cache.system_jumps_max_age,
+        if_none_match,
     )
 
 

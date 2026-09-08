@@ -20,6 +20,7 @@ from app import entities
 from app.esi import (
     SOV_MAP,
     SOV_STRUCTURES,
+    SYSTEM_JUMPS,
     EsiFeed,
     EsiFeedRefreshError,
     esi_client,
@@ -34,7 +35,7 @@ _LOCK_KEY = "kills:broadcaster:leader"
 _LOCK_TTL = 30
 _ELECTION_INTERVAL = 10
 
-LEADER_FEEDS: tuple[EsiFeed, ...] = (SOV_MAP, SOV_STRUCTURES)
+LEADER_FEEDS: tuple[EsiFeed, ...] = (SOV_MAP, SOV_STRUCTURES, SYSTEM_JUMPS)
 
 _RENEW_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then

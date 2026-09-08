@@ -6,9 +6,10 @@ from fastapi import APIRouter, Query, Header, Depends, HTTPException
 
 from app.config import config
 from app.cache import query_cache, single_flight
+from app.esi import SYSTEM_JUMPS, esi_client
 from app.global_kills import fetch_global_kills, fetch_filtered_global_kills, MAP_RANGES
 from app.http_cache import json_cache_response
-from app.models import RankSystemsResponse
+from app.models import RankSystemsResponse, SystemJumpsResponse
 from app.queries import fetch_top_systems, fetch_bottom_systems, fetch_system_kills
 from app.routers.dependencies import get_filter
 from app.filters import Filter
@@ -137,6 +138,48 @@ async def get_system_kills_stats(
     ttl = config.cache.rankings_ttl if flt.is_empty else config.cache.filtered_map_ttl
     return json_cache_response(
         body, gzipped, etag, ttl, if_none_match, revalidate=True
+    )
+
+
+async def build_system_jumps() -> tuple[str, bool, bytes]:
+    """Get-or-build-and-cache the global jumps response.
+
+    Sole owner of the ``system_jumps`` prefix + params shape."""
+    params: dict = {}
+    res = await query_cache.get("system_jumps", params)
+    if res is None:
+        async with single_flight.lock("system_jumps"):
+            res = await query_cache.get("system_jumps", params)
+            if res is None:
+                jumps = await esi_client.get_cached(SYSTEM_JUMPS)
+                if jumps is None:
+                    raise HTTPException(
+                        status_code=503, detail="jump data warming up"
+                    )
+                ordered = sorted(jumps.items())
+                result = SystemJumpsResponse(
+                    system_ids=[sid for sid, _ in ordered],
+                    jumps=[n for _, n in ordered],
+                )
+                res = await query_cache.set(
+                    "system_jumps",
+                    params,
+                    result.model_dump_json(),
+                    ttl=config.cache.system_jumps_ttl,
+                )
+    return res
+
+
+@router.get("/stats/system-jumps", response_model=None)
+async def get_system_jumps_stats(
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
+):
+    """Ship jumps per system over the past hour, as index-aligned columns:
+    jumps[i] belongs to system_ids[i]. Only systems ESI reported are included;
+    treat a missing system as 0."""
+    etag, gzipped, body = await build_system_jumps()
+    return json_cache_response(
+        body, gzipped, etag, config.cache.system_jumps_max_age, if_none_match
     )
 
 

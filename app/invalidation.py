@@ -21,6 +21,7 @@ INVALIDATION_PATTERNS = {
     "farthest_kill": "query:v2:farthest_kill:*",
     "sov": "query:v2:sov:*",
     "sov_map": "query:v2:sov_map:*",
+    "system_jumps": "query:v2:system_jumps:*",
 }
 
 # Targets whose response cache is repopulated ("warmed") right after a flush,
