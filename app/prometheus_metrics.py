@@ -204,7 +204,7 @@ ws_connections = Counter(
 live_clients = Gauge(
     "eve_killmap_live_clients",
     "Currently connected live-map WebSocket clients, by transport.",
-    ["transport"],  # ws
+    ["transport"],  # ws | ws_status
 )
 ws_messages_dropped = Counter(
     "eve_killmap_ws_messages_dropped",
