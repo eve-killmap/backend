@@ -166,6 +166,11 @@ def test_subscriber_loop_subscribes_both_channels_and_routes_each(monkeypatch):
     b._redis = _FakePubSubRedis(pubsub)
     kq = b.subscribe_global()
     sq = b.subscribe_status()
+
+    async def _no_backoff(_seconds):
+        raise AssertionError("cancellation was swallowed into a retry")
+
+    monkeypatch.setattr(rc.asyncio, "sleep", _no_backoff)
     try:
         with pytest.raises(asyncio.CancelledError):
             asyncio.run(b._subscriber_loop())
