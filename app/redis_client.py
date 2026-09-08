@@ -35,6 +35,9 @@ logger = logging.getLogger(__name__)
 _LOCK_KEY = "kills:broadcaster:leader"
 _LOCK_TTL = 30
 _ELECTION_INTERVAL = 10
+_SUBSCRIBER_RETRY_INITIAL = 1.0
+_SUBSCRIBER_RETRY_MAX = 30.0
+_SUBSCRIBER_STABLE_SECONDS = 60.0
 
 LEADER_FEEDS: tuple[EsiFeed, ...] = (SOV_MAP, SOV_STRUCTURES, SYSTEM_JUMPS, STATUS)
 
@@ -260,6 +263,7 @@ class KillBroadcaster:
         self._status_subs: set[asyncio.Queue] = set()
         self._redis: aioredis.Redis | None = None
         self._subscriber_task: asyncio.Task | None = None
+        self._subscriber_connected: bool = False
         self._leader_tasks: list[asyncio.Task] = []
         self._election_task: asyncio.Task | None = None
         self._is_leader: bool = False
@@ -470,33 +474,54 @@ class KillBroadcaster:
                 delay = self._retry_delay(failures)
             await asyncio.sleep(delay)
 
+    def _set_subscriber_connected(self, connected: bool) -> None:
+        self._subscriber_connected = connected
+        pm.broadcaster_subscriber_connected.set(1 if connected else 0)
+
     async def _subscriber_loop(self) -> None:
+        """Deliver pubsub messages to the fan-outs, reconnecting until cancelled.
+
+        A closed stream is as fatal to delivery as an error, so both reconnect: a
+        fresh pubsub is created per attempt because the old one may be unusable.
+        Backoff grows to _SUBSCRIBER_RETRY_MAX and resets once a connection has
+        lasted _SUBSCRIBER_STABLE_SECONDS, so a flapping Redis cannot hot-spin."""
         assert self._redis is not None  # set in start() before task is created
-        pubsub = self._redis.pubsub()
         channels = (config.streaming.pubsub_channel, config.streaming.status_channel)
-        await pubsub.subscribe(*channels)
-        try:
-            async for message in pubsub.listen():
-                if message["type"] != "message":
-                    continue
-                try:
-                    payload = json.loads(message["data"])
-                except Exception as exc:
-                    logger.warning("Broadcaster: malformed pubsub message: %s", exc)
-                    continue
-                self._dispatch(message["channel"], payload)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            pm.errors.labels(component="broadcaster").inc()
-            logger.warning("Broadcaster: subscriber error: %s; retrying in 2s", exc)
-            await asyncio.sleep(2)
-        finally:
+        delay = _SUBSCRIBER_RETRY_INITIAL
+        while True:
+            pubsub = self._redis.pubsub()
+            started = time.monotonic()
             try:
-                await pubsub.unsubscribe(*channels)
-                await pubsub.aclose()
-            except Exception:
-                pass
+                await pubsub.subscribe(*channels)
+                self._set_subscriber_connected(True)
+                async for message in pubsub.listen():
+                    if message["type"] != "message":
+                        continue
+                    try:
+                        payload = json.loads(message["data"])
+                    except Exception as exc:
+                        logger.warning("Broadcaster: malformed pubsub message: %s", exc)
+                        continue
+                    self._dispatch(message["channel"], payload)
+                reason = "pubsub stream ended"
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                pm.errors.labels(component="broadcaster").inc()
+                reason = f"subscriber error: {exc}"
+            finally:
+                self._set_subscriber_connected(False)
+                try:
+                    await pubsub.unsubscribe(*channels)
+                    await pubsub.aclose()
+                except Exception:
+                    pass
+            if time.monotonic() - started >= _SUBSCRIBER_STABLE_SECONDS:
+                delay = _SUBSCRIBER_RETRY_INITIAL
+            pm.broadcaster_subscriber_reconnects.inc()
+            logger.warning("Broadcaster: %s; resubscribing in %.1fs", reason, delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, _SUBSCRIBER_RETRY_MAX)
 
     def _dispatch(self, channel: str, payload: dict) -> None:
         if channel == config.streaming.pubsub_channel:
@@ -538,7 +563,16 @@ class KillBroadcaster:
 
     @property
     def is_running(self) -> bool:
-        return self._subscriber_task is not None and not self._subscriber_task.done()
+        """True only while the subscriber task is alive AND actually subscribed.
+
+        The task now survives Redis failures, so task liveness alone no longer
+        implies delivery; _ws_guard reads this to reject sockets (1011) during an
+        outage rather than accepting clients into silence."""
+        return (
+            self._subscriber_task is not None
+            and not self._subscriber_task.done()
+            and self._subscriber_connected
+        )
 
     @property
     def is_leader(self) -> bool:

@@ -168,6 +168,15 @@ esi_error_limit_remain = Gauge(
     "eve_killmap_esi_error_limit_remain",
     "Errors remaining in ESI's current error-limit window (X-ESI-Error-Limit-Remain).",
 )
+broadcaster_subscriber_connected = Gauge(
+    "eve_killmap_broadcaster_subscriber_connected",
+    "1 while this worker's pubsub subscriber is subscribed and delivering, else 0 "
+    "(0 means live kill and status sockets are rejected on this worker).",
+)
+broadcaster_subscriber_reconnects = Counter(
+    "eve_killmap_broadcaster_subscriber_reconnects",
+    "Times the pubsub subscriber re-subscribed after an error or a closed stream.",
+)
 stream_entries_read = Counter(
     "eve_killmap_stream_entries_read",
     "Kill stream entries read by the leader.",
