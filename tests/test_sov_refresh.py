@@ -43,7 +43,6 @@ def test_refresh_once_publishes_invalidation_and_returns_cadence(monkeypatch):
     )
 
 
-@pytest.mark.skip(reason="STATUS feed lands in Task 6")
 def test_refresh_once_broadcasts_when_channel_set(monkeypatch):
     from app.esi import STATUS
 

@@ -20,6 +20,7 @@ from app import entities
 from app.esi import (
     SOV_MAP,
     SOV_STRUCTURES,
+    STATUS,
     SYSTEM_JUMPS,
     EsiFeed,
     EsiFeedRefreshError,
@@ -35,7 +36,7 @@ _LOCK_KEY = "kills:broadcaster:leader"
 _LOCK_TTL = 30
 _ELECTION_INTERVAL = 10
 
-LEADER_FEEDS: tuple[EsiFeed, ...] = (SOV_MAP, SOV_STRUCTURES, SYSTEM_JUMPS)
+LEADER_FEEDS: tuple[EsiFeed, ...] = (SOV_MAP, SOV_STRUCTURES, SYSTEM_JUMPS, STATUS)
 
 _RENEW_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -256,6 +257,7 @@ class KillBroadcaster:
     def __init__(self) -> None:
         self._global_subs: set[asyncio.Queue] = set()
         self._system_subs: dict[int, set[asyncio.Queue]] = {}
+        self._status_subs: set[asyncio.Queue] = set()
         self._redis: aioredis.Redis | None = None
         self._subscriber_task: asyncio.Task | None = None
         self._leader_tasks: list[asyncio.Task] = []
@@ -469,7 +471,8 @@ class KillBroadcaster:
     async def _subscriber_loop(self) -> None:
         assert self._redis is not None  # set in start() before task is created
         pubsub = self._redis.pubsub()
-        await pubsub.subscribe(config.streaming.pubsub_channel)
+        channels = (config.streaming.pubsub_channel, config.streaming.status_channel)
+        await pubsub.subscribe(*channels)
         try:
             async for message in pubsub.listen():
                 if message["type"] != "message":
@@ -479,7 +482,7 @@ class KillBroadcaster:
                 except Exception as exc:
                     logger.warning("Broadcaster: malformed pubsub message: %s", exc)
                     continue
-                self._fanout(payload)
+                self._dispatch(message["channel"], payload)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -488,10 +491,28 @@ class KillBroadcaster:
             await asyncio.sleep(2)
         finally:
             try:
-                await pubsub.unsubscribe(config.streaming.pubsub_channel)
+                await pubsub.unsubscribe(*channels)
                 await pubsub.aclose()
             except Exception:
                 pass
+
+    def _dispatch(self, channel: str, payload: dict) -> None:
+        if channel == config.streaming.status_channel:
+            self._fanout_status(payload)
+        else:
+            self._fanout(payload)
+
+    def _push(self, subs: set[asyncio.Queue], payload: dict) -> set[asyncio.Queue]:
+        """Deliver to every queue; return those that were full, so the caller can
+        drop them from its subscriber set."""
+        dead: set[asyncio.Queue] = set()
+        for q in subs:
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                dead.add(q)
+                pm.ws_messages_dropped.inc()
+        return dead
 
     def _fanout(self, payload: dict) -> None:
         system_id: int = payload["solar_system_id"]
@@ -502,24 +523,14 @@ class KillBroadcaster:
             k: v for k, v in payload.items() if k in _SYSTEM_FIELDS and v is not None
         }
 
-        dead: set[asyncio.Queue] = set()
-        for q in self._global_subs:
-            try:
-                q.put_nowait(global_payload)
-            except asyncio.QueueFull:
-                dead.add(q)
-                pm.ws_messages_dropped.inc()
-        self._global_subs -= dead
+        self._global_subs -= self._push(self._global_subs, global_payload)
 
-        dead = set()
-        for q in self._system_subs.get(system_id, set()):
-            try:
-                q.put_nowait(system_payload)
-            except asyncio.QueueFull:
-                dead.add(q)
-                pm.ws_messages_dropped.inc()
+        dead = self._push(self._system_subs.get(system_id, set()), system_payload)
         if system_id in self._system_subs:
             self._system_subs[system_id] -= dead
+
+    def _fanout_status(self, payload: dict) -> None:
+        self._status_subs -= self._push(self._status_subs, payload)
 
     @property
     def is_running(self) -> bool:
@@ -542,6 +553,20 @@ class KillBroadcaster:
         if removed:
             metrics.ws_global_connections -= 1
             pm.live_clients.labels(transport="ws").dec()
+
+    def subscribe_status(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._status_subs.add(q)
+        metrics.ws_status_connections += 1
+        pm.live_clients.labels(transport="ws_status").inc()
+        return q
+
+    def unsubscribe_status(self, q: asyncio.Queue) -> None:
+        removed = q in self._status_subs
+        self._status_subs.discard(q)
+        if removed:
+            metrics.ws_status_connections -= 1
+            pm.live_clients.labels(transport="ws_status").dec()
 
     def subscribe_system(self, system_id: int) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=100)

@@ -60,6 +60,7 @@ _COUNTER_KEYS = (
     "cache_misses",
     "ws_global_connections",
     "ws_system_connections",
+    "ws_status_connections",
 )
 
 

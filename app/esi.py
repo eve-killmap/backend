@@ -299,6 +299,9 @@ class EsiClient:
     async def get_system_jumps_cached(self) -> dict[int, int] | None:
         return await self.get_cached(SYSTEM_JUMPS)
 
+    async def get_status_cached(self) -> dict | None:
+        return await self.get_cached(STATUS)
+
 
 SOV_MAP = EsiFeed(
     name="sov",
@@ -346,6 +349,24 @@ SYSTEM_JUMPS = EsiFeed(
     sleep_max=3600,
     store_ttl=lambda: 7200,
     invalidate_targets=("system_jumps",),
+)
+
+# store_ttl is deliberately far longer than the ~28s refresh cadence: an `ex` close to
+# the cadence would let the key lapse between refreshes and read back as a cold cache.
+STATUS = EsiFeed(
+    name="status",
+    path="/status/",
+    redis_key="esi:status",
+    fallback_ttl=lambda: config.cache.esi_status_fallback_ttl,
+    ttl_floor=15,
+    transform=lambda data: {"online": True, "players": data["players"]},
+    decode=lambda raw: raw,
+    sleep_skew=2,
+    sleep_min=15,
+    sleep_max=60,
+    store_ttl=lambda: 600,
+    broadcast_channel=config.streaming.status_channel,
+    offline_value={"online": False},
 )
 
 
