@@ -476,7 +476,7 @@ def load_config(
             limits_cfg.get("max_name_ids", 100), "limits.max_name_ids", minimum=1
         ),
         max_ws_connections=_as_int(
-            limits_cfg.get("max_ws_connections", 1000),
+            limits_cfg.get("max_ws_connections", 2000),
             "limits.max_ws_connections",
             minimum=1,
         ),
