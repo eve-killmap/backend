@@ -1,7 +1,11 @@
 import asyncio
 import json
 
+import pytest
+
+import app.routers.ws as ws_router
 from app import redis_client as rc
+from app.metrics import metrics
 from app.redis_client import broadcaster
 
 
@@ -115,3 +119,81 @@ def test_subscriber_loop_subscribes_both_channels_and_routes_each(monkeypatch):
     finally:
         b.unsubscribe_global(kq)
         b.unsubscribe_status(sq)
+
+
+class _FakeWS:
+    def __init__(self):
+        self.headers = {"origin": "http://localhost"}
+        self.sent: list[str] = []
+        self.accepted = False
+        self.closed: tuple | None = None
+
+    async def accept(self):
+        self.accepted = True
+
+    async def send_text(self, text):
+        self.sent.append(text)
+
+    async def receive(self):
+        return {"type": "websocket.disconnect"}
+
+    async def close(self, code=1000, reason=""):
+        self.closed = (code, reason)
+
+
+async def _ok_guard(_ws):
+    return True
+
+
+def _patch_status_cache(monkeypatch, value):
+    async def fake_cached():
+        return value
+
+    monkeypatch.setattr(ws_router.esi_client, "get_status_cached", fake_cached)
+
+
+def test_ws_status_sends_cached_snapshot_on_connect(monkeypatch):
+    monkeypatch.setattr(ws_router, "_ws_guard", _ok_guard)
+    _patch_status_cache(monkeypatch, {"online": True, "players": 77})
+    sock = _FakeWS()
+    asyncio.run(ws_router.ws_universe_status(sock))
+    assert '"players":77' in sock.sent[0] or '"players": 77' in sock.sent[0]
+
+
+def test_ws_status_silent_when_cache_cold(monkeypatch):
+    # A cold cache must NOT be reported as the cluster being offline.
+    monkeypatch.setattr(ws_router, "_ws_guard", _ok_guard)
+    _patch_status_cache(monkeypatch, None)
+    sock = _FakeWS()
+    asyncio.run(ws_router.ws_universe_status(sock))
+    assert sock.sent == []
+
+
+def test_ws_status_releases_slot_on_abnormal_disconnect(monkeypatch):
+    """A socket that dies mid-handshake must still give its slot back, or the
+    counter climbs monotonically and eventually trips the capacity guard."""
+    monkeypatch.setattr(ws_router, "_ws_guard", _ok_guard)
+    _patch_status_cache(monkeypatch, {"online": True, "players": 3})
+
+    class _BrokenWS(_FakeWS):
+        async def accept(self):
+            raise RuntimeError("connection reset")
+
+    before = metrics.ws_status_connections
+    with pytest.raises(RuntimeError):
+        asyncio.run(ws_router.ws_universe_status(_BrokenWS()))
+    assert metrics.ws_status_connections == before
+    assert broadcaster._status_subs == set()
+
+
+def test_ws_guard_counts_status_sockets_toward_capacity(monkeypatch):
+    """A status socket costs a connection slot like any other."""
+    monkeypatch.setattr(ws_router, "origin_allowed", lambda *_: True)
+    monkeypatch.setattr(
+        ws_router.metrics,
+        "ws_status_connections",
+        ws_router.config.limits.max_ws_connections,
+    )
+    sock = _FakeWS()
+    assert asyncio.run(ws_router._ws_guard(sock)) is False
+    assert sock.closed == (1013, "Server at capacity")

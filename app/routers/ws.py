@@ -4,6 +4,7 @@ import json
 from fastapi import APIRouter, WebSocket
 
 from app.config import config
+from app.esi import esi_client
 from app.metrics import metrics
 from app.security import origin_allowed, at_capacity
 from app.redis_client import broadcaster
@@ -12,9 +13,16 @@ from app import prometheus_metrics
 router = APIRouter()
 
 
-async def _ws_stream(websocket: WebSocket, q: asyncio.Queue) -> None:
-    """Accept a WebSocket and stream kills from q until the client disconnects."""
+async def _ws_stream(
+    websocket: WebSocket, q: asyncio.Queue, snapshot: dict | None = None
+) -> None:
+    """Accept a WebSocket and stream kills from q until the client disconnects.
+
+    A snapshot, when given, is sent on the connection itself so its delivery does
+    not depend on the streaming task being scheduled before the client hangs up."""
     await websocket.accept()
+    if snapshot is not None:
+        await websocket.send_text(json.dumps(snapshot))
 
     async def _send() -> None:
         while True:
@@ -48,7 +56,11 @@ async def _ws_guard(websocket: WebSocket) -> bool:
             transport="ws", outcome="rejected_origin"
         ).inc()
         return False
-    current = metrics.ws_global_connections + metrics.ws_system_connections
+    current = (
+        metrics.ws_global_connections
+        + metrics.ws_system_connections
+        + metrics.ws_status_connections
+    )
     if at_capacity(current, config.limits.max_ws_connections):
         await websocket.accept()
         await websocket.close(code=1013, reason="Server at capacity")
@@ -89,3 +101,18 @@ async def ws_system_kills(websocket: WebSocket, solar_system_id: int):
         await _ws_stream(websocket, q)
     finally:
         broadcaster.unsubscribe_system(solar_system_id, q)
+
+
+@router.websocket("/ws/universe/status")
+async def ws_universe_status(websocket: WebSocket):
+    """Stream EVE cluster status: {"online": true, "players": N} or {"online": false}.
+
+    Sends the last known status immediately on connect. A cold cache sends nothing
+    rather than reporting the cluster offline."""
+    if not await _ws_guard(websocket):
+        return
+    q = broadcaster.subscribe_status()
+    try:
+        await _ws_stream(websocket, q, await esi_client.get_status_cached())
+    finally:
+        broadcaster.unsubscribe_status(q)
