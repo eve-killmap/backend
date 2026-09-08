@@ -405,3 +405,29 @@ def test_time_window_defaults():
     assert cfg.limits.system_rankings_default_limit == 10
     assert cfg.limits.global_kills_default_bins == 300
     assert cfg.cache.warm_on_signal is True
+
+
+def test_esi_feed_and_jumps_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.cache.esi_system_jumps_fallback_ttl == 3600
+    assert cfg.cache.esi_status_fallback_ttl == 30
+    assert cfg.cache.system_jumps_ttl == 3600
+    assert cfg.cache.system_jumps_max_age == 900
+    assert cfg.cache.esi_retry_initial_seconds == 30
+    assert cfg.cache.esi_retry_max_seconds == 600
+    assert cfg.streaming.status_channel == "universe:status"
+
+
+def test_esi_feed_knobs_from_yaml(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path,
+        "cache:\n"
+        "  esi_status_fallback_ttl: 45\n"
+        "  esi_retry_max_seconds: 120\n"
+        "streaming:\n"
+        "  status_channel: custom:status\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.cache.esi_status_fallback_ttl == 45
+    assert cfg.cache.esi_retry_max_seconds == 120
+    assert cfg.streaming.status_channel == "custom:status"

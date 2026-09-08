@@ -60,6 +60,12 @@ cache:
   war_details_ttl: 21600    # /wars/details per-id cache (6h)
   esi_sov_structures_fallback_ttl: 3600  # sov structures (ADM) when no Expires header (1h)
   sov_map_ttl: 3600                      # /universe/sov response
+  esi_system_jumps_fallback_ttl: 3600   # /universe/system_jumps when ESI sends no Expires
+  esi_status_fallback_ttl: 30           # /status when ESI sends no Expires
+  system_jumps_ttl: 3600                # server cache for /stats/system-jumps
+  system_jumps_max_age: 900             # browser/edge max-age for both jumps endpoints
+  esi_retry_initial_seconds: 30         # first retry delay after a failed feed refresh
+  esi_retry_max_seconds: 600            # backoff ceiling
   # Browser/edge max-age for slow-changing sov + farthest_kill (decoupled from the
   # server cache TTLs above; bounds client staleness without per-request revalidation).
   sov_max_age: 900                       # sov + sov_map browser max-age (~15m)
@@ -84,6 +90,7 @@ streaming:
   stream_name: kills:live          # Redis stream the backend tails
   pubsub_channel: kills:enriched   # internal fan-out channel between workers
   invalidate_channel: cache:invalidate   # cache-invalidation pub/sub
+  status_channel: universe:status       # leader -> workers server-status broadcasts
 
 health:
   # Per-worker heartbeat interval and key TTL (seconds). TTL should be >= 2x interval.

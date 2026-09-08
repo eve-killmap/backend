@@ -80,6 +80,12 @@ class CacheConfig:
     war_search_ttl: int
     war_details_ttl: int
     sov_map_ttl: int
+    esi_system_jumps_fallback_ttl: int
+    esi_status_fallback_ttl: int
+    system_jumps_ttl: int
+    system_jumps_max_age: int
+    esi_retry_initial_seconds: int
+    esi_retry_max_seconds: int
     sov_max_age: int
     farthest_kill_max_age: int
     warm_on_signal: bool
@@ -100,6 +106,7 @@ class StreamingConfig:
     stream_name: str
     pubsub_channel: str
     invalidate_channel: str
+    status_channel: str
 
 
 @dataclass(frozen=True)
@@ -362,6 +369,34 @@ def load_config(
         sov_map_ttl=_as_int(
             cache_cfg.get("sov_map_ttl", 3600), "cache.sov_map_ttl", minimum=1
         ),
+        esi_system_jumps_fallback_ttl=_as_int(
+            cache_cfg.get("esi_system_jumps_fallback_ttl", 3600),
+            "cache.esi_system_jumps_fallback_ttl",
+            minimum=1,
+        ),
+        esi_status_fallback_ttl=_as_int(
+            cache_cfg.get("esi_status_fallback_ttl", 30),
+            "cache.esi_status_fallback_ttl",
+            minimum=1,
+        ),
+        system_jumps_ttl=_as_int(
+            cache_cfg.get("system_jumps_ttl", 3600), "cache.system_jumps_ttl", minimum=1
+        ),
+        system_jumps_max_age=_as_int(
+            cache_cfg.get("system_jumps_max_age", 900),
+            "cache.system_jumps_max_age",
+            minimum=0,
+        ),
+        esi_retry_initial_seconds=_as_int(
+            cache_cfg.get("esi_retry_initial_seconds", 30),
+            "cache.esi_retry_initial_seconds",
+            minimum=1,
+        ),
+        esi_retry_max_seconds=_as_int(
+            cache_cfg.get("esi_retry_max_seconds", 600),
+            "cache.esi_retry_max_seconds",
+            minimum=1,
+        ),
         sov_max_age=_as_int(
             cache_cfg.get("sov_max_age", 900), "cache.sov_max_age", minimum=0
         ),
@@ -411,6 +446,7 @@ def load_config(
         stream_name=stream_cfg.get("stream_name", "kills:live"),
         pubsub_channel=stream_cfg.get("pubsub_channel", "kills:enriched"),
         invalidate_channel=stream_cfg.get("invalidate_channel", "cache:invalidate"),
+        status_channel=stream_cfg.get("status_channel", "universe:status"),
     )
 
     expected_workers_raw = health_cfg.get("expected_workers")
