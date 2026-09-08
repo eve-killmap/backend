@@ -19,7 +19,7 @@ from app.id_ranges import (
 from app.eve_images import image_url
 from app.models import NameResolution, SovereigntyMapResponse
 from app.cache import query_cache, single_flight
-from app.esi import esi_client
+from app.esi import SOV_MAP, SOV_STRUCTURES, esi_client
 from app.http_cache import json_cache_response
 
 router = APIRouter()
@@ -225,12 +225,14 @@ async def get_sovereignty_map(
         async with single_flight.lock("sov_map"):
             res = await query_cache.get("sov_map", cache_params)
             if res is None:
-                sov_map = await esi_client.get_sov_map_cached()
+                sov_map: dict[int, dict] | None = await esi_client.get_cached(SOV_MAP)
                 if sov_map is None:
                     raise HTTPException(
                         status_code=503, detail="Sovereignty data warming up"
                     )
-                adm_records = await esi_client.get_sov_structures_cached()
+                adm_records: dict[int, dict] | None = await esi_client.get_cached(
+                    SOV_STRUCTURES
+                )
                 adm_by_system = (
                     {sid: rec["adm"] for sid, rec in adm_records.items()}
                     if adm_records is not None

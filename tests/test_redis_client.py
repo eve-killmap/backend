@@ -234,3 +234,123 @@ def test_enrich_kill_resilient_on_db_error(monkeypatch):
     out = asyncio.run(rc._enrich_kill(kill))  # must not raise
     assert out["v_character_name"] is None
     assert out["v_corporation_name"] is None
+
+
+class _FakeLeaderRedis(_FakeLockRedis):
+    """Lock Redis whose stream read parks forever, so a promoted broadcaster's
+    leader loop starts for real without sleeping or reaching a network."""
+
+    def __init__(self):
+        super().__init__()
+        self.xread_calls = 0
+
+    async def xinfo_stream(self, name):
+        from redis.exceptions import ResponseError
+
+        raise ResponseError("no such key")  # -> the loop starts from "$"
+
+    async def xread(self, streams, block=None, count=None):
+        self.xread_calls += 1
+        await asyncio.Event().wait()
+
+    async def aclose(self):
+        pass
+
+
+class _StalledEsi:
+    """Records the feed each refresh loop asks for, then parks that task."""
+
+    def __init__(self):
+        self.feeds: list[str] = []
+
+    async def refresh(self, feed):
+        self.feeds.append(feed.name)
+        await asyncio.Event().wait()
+
+
+async def _promoted(monkeypatch):
+    """A broadcaster promoted through the REAL _promote, with every leader task
+    started and parked on its first await."""
+    esi = _StalledEsi()
+    monkeypatch.setattr(rc, "esi_client", esi)
+    b = KillBroadcaster()
+    redis = _FakeLeaderRedis()
+    b._redis = redis  # type: ignore[assignment]
+    await b._promote()
+    await asyncio.sleep(0)  # let every task reach its first await
+    return b, esi, redis
+
+
+def test_promote_starts_one_task_per_feed_plus_the_leader_loop(monkeypatch):
+    async def scenario():
+        b, esi, redis = await _promoted(monkeypatch)
+        try:
+            assert b._is_leader is True
+            assert len(b._leader_tasks) == len(rc.LEADER_FEEDS) + 1
+            assert sorted(esi.feeds) == sorted(f.name for f in rc.LEADER_FEEDS)
+            assert redis.xread_calls == 1  # the leader loop itself is running too
+            assert all(not t.done() for t in b._leader_tasks)
+        finally:
+            await b._demote()
+
+    asyncio.run(scenario())
+
+
+def test_demote_cancels_every_leader_task(monkeypatch):
+    """A demoted worker that keeps its tasks polls ESI and republishes
+    invalidations alongside the real leader, silently and forever."""
+
+    async def scenario():
+        b, _, _ = await _promoted(monkeypatch)
+        tasks = list(b._leader_tasks)
+        await b._demote()
+
+        assert b._is_leader is False
+        assert b._leader_tasks == []
+        assert all(t.cancelled() for t in tasks)
+
+    asyncio.run(scenario())
+
+
+def test_promote_demote_promote_does_not_accumulate_tasks(monkeypatch):
+    async def scenario():
+        b, _, _ = await _promoted(monkeypatch)
+        first = list(b._leader_tasks)
+        await b._demote()
+        await b._promote()
+        await asyncio.sleep(0)
+        try:
+            assert len(b._leader_tasks) == len(rc.LEADER_FEEDS) + 1
+            assert not set(first) & set(b._leader_tasks)  # a fresh generation
+        finally:
+            await b._demote()
+
+    asyncio.run(scenario())
+
+
+def test_second_promote_while_leader_is_a_no_op(monkeypatch):
+    async def scenario():
+        b, esi, _ = await _promoted(monkeypatch)
+        tasks = list(b._leader_tasks)
+        await b._promote()
+        await asyncio.sleep(0)
+        try:
+            assert b._leader_tasks == tasks
+            assert len(esi.feeds) == len(rc.LEADER_FEEDS)  # no second set of loops
+        finally:
+            await b._demote()
+
+    asyncio.run(scenario())
+
+
+def test_stop_cancels_leader_tasks(monkeypatch):
+    async def scenario():
+        b, _, _ = await _promoted(monkeypatch)
+        tasks = list(b._leader_tasks)
+        await b.stop()
+
+        assert b._leader_tasks == []
+        assert all(t.cancelled() for t in tasks)
+        assert b._is_leader is False
+
+    asyncio.run(scenario())

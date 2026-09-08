@@ -207,7 +207,7 @@ class EsiClient:
             async with session.get(f"{ESI_BASE}{feed.path}") as resp:
                 self._record_error_limit(resp.headers)
                 resp.raise_for_status()
-                return await resp.json(), resp.headers.get("Expires")
+                data, expires = await resp.json(), resp.headers.get("Expires")
         except aiohttp.ClientError as exc:
             pm.esi_requests.labels(endpoint=feed.name, outcome="error").inc()
             pm.errors.labels(component="esi").inc()
@@ -220,6 +220,8 @@ class EsiClient:
             pm.esi_request_seconds.labels(endpoint=feed.name).observe(
                 time.perf_counter() - _start
             )
+        pm.esi_requests.labels(endpoint=feed.name, outcome="ok").inc()
+        return data, expires
 
     def _record_error_limit(self, headers) -> None:
         remain = headers.get("X-ESI-Error-Limit-Remain")
@@ -281,7 +283,6 @@ class EsiClient:
                 pm.esi_feed_refreshes.labels(feed=feed.name, outcome="error").inc()
                 logger.warning("ESI feed %s refresh failed: %s", feed.name, exc)
             raise EsiFeedRefreshError(feed.name) from exc
-        pm.esi_requests.labels(endpoint=feed.name, outcome="ok").inc()
         ttl = ttl_from_expires(expires, feed.fallback_ttl(), feed.ttl_floor)
         value = feed.transform(data)
         await self._store(feed, value, ttl)
@@ -297,15 +298,6 @@ class EsiClient:
             return None
         pm.esi_cache_hits.labels(entity=feed.name).inc()
         return feed.decode(json.loads(cached))
-
-    async def get_sov_map_cached(self) -> dict[int, dict] | None:
-        return await self.get_cached(SOV_MAP)
-
-    async def get_sov_structures_cached(self) -> dict[int, dict] | None:
-        return await self.get_cached(SOV_STRUCTURES)
-
-    async def get_status_cached(self) -> dict | None:
-        return await self.get_cached(STATUS)
 
 
 SOV_MAP = EsiFeed(

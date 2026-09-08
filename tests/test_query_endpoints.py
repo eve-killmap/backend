@@ -3,6 +3,7 @@ import asyncio
 import app.routers.stats as stats
 import app.routers.systems as systems
 from app.cache import QueryCache
+from app.esi import SOV_MAP, SOV_STRUCTURES
 from app.filters import parse_filter
 
 
@@ -16,6 +17,19 @@ class _FakeRedisRaising:
         from redis.exceptions import RedisError
 
         raise RedisError("boom")
+
+
+def _patch_sov_feeds(monkeypatch, *, sov_map, adm=None):
+    """Serve the sov feeds through the generic get_cached reader. A feed with no
+    fake raises KeyError, so an unexpected read is a failure, not empty data."""
+    fakes = {SOV_MAP.name: sov_map}
+    if adm is not None:
+        fakes[SOV_STRUCTURES.name] = adm
+
+    async def fake_get_cached(feed):
+        return await fakes[feed.name]()
+
+    monkeypatch.setattr(systems.esi_client, "get_cached", fake_get_cached)
 
 
 def test_sov_serves_from_cache_hit(monkeypatch):
@@ -55,7 +69,7 @@ def test_sov_single_flight_builds_once(monkeypatch):
 
     monkeypatch.setattr(systems.query_cache, "get", fake_get)
     monkeypatch.setattr(systems.query_cache, "set", fake_set)
-    monkeypatch.setattr(systems.esi_client, "get_sov_map_cached", fake_map)
+    _patch_sov_feeds(monkeypatch, sov_map=fake_map)
 
     async def go():
         return await asyncio.gather(
@@ -76,7 +90,7 @@ def test_sov_graceful_degradation_returns_200(monkeypatch):
     async def fake_map():
         return {}
 
-    monkeypatch.setattr(systems.esi_client, "get_sov_map_cached", fake_map)
+    _patch_sov_feeds(monkeypatch, sov_map=fake_map)
     resp = asyncio.run(systems.get_system_sov(30000300, if_none_match=None))
     assert resp.status_code == 200
     assert b"claimed" in resp.body
@@ -105,9 +119,8 @@ def test_sov_claimed_includes_adm(monkeypatch):
 
     monkeypatch.setattr(systems.query_cache, "get", fake_get)
     monkeypatch.setattr(systems.query_cache, "set", fake_set)
-    monkeypatch.setattr(systems.esi_client, "get_sov_map_cached", fake_map)
     monkeypatch.setattr(systems.esi_client, "get_alliance_info", fake_alliance)
-    monkeypatch.setattr(systems.esi_client, "get_sov_structures_cached", fake_adm)
+    _patch_sov_feeds(monkeypatch, sov_map=fake_map, adm=fake_adm)
 
     resp = asyncio.run(systems.get_system_sov(30000142, if_none_match=None))
     assert resp.status_code == 200
@@ -139,9 +152,8 @@ def test_sov_claimed_without_structures_omits_adm(monkeypatch):
 
     monkeypatch.setattr(systems.query_cache, "get", fake_get)
     monkeypatch.setattr(systems.query_cache, "set", fake_set)
-    monkeypatch.setattr(systems.esi_client, "get_sov_map_cached", fake_map)
     monkeypatch.setattr(systems.esi_client, "get_alliance_info", fake_alliance)
-    monkeypatch.setattr(systems.esi_client, "get_sov_structures_cached", fake_adm)
+    _patch_sov_feeds(monkeypatch, sov_map=fake_map, adm=fake_adm)
 
     resp = asyncio.run(systems.get_system_sov(30000142, if_none_match=None))
     body = _json.loads(resp.body)

@@ -22,6 +22,13 @@ def _refreshes(feed_name, outcome):
     )
 
 
+def _requests(feed_name, outcome):
+    return _sample(
+        "eve_killmap_esi_requests_total",
+        {"endpoint": feed_name, "outcome": outcome},
+    )
+
+
 class _FakeRedis:
     def __init__(self):
         self.store: dict[str, str] = {}
@@ -257,6 +264,32 @@ def test_broadcast_publishes_the_decoded_value(monkeypatch):
     assert channel == "probe:broadcast"
     assert json.loads(data) == {"n": 3, "decoded": True}
     assert json.loads(data) == asyncio.run(client.get_cached(feed))
+
+
+def test_request_success_is_recorded_even_when_the_transform_fails(monkeypatch):
+    """esi_requests describes the HTTP call, so a transform that raises afterwards
+    must not erase the request's success -- the same split corporation/alliance use."""
+
+    def boom(_data):
+        raise KeyError("players")
+
+    feed = _feed(name="probe_transform", transform=boom)
+    client = esi_mod.EsiClient()
+    client._redis = _FakeRedis()
+    session = _FakeSession(_FakeResponse({}))
+
+    async def fake_get_session():
+        return session
+
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+    before = _requests("probe_transform", "ok")
+    with pytest.raises(KeyError):
+        asyncio.run(client.refresh(feed))
+
+    assert _requests("probe_transform", "ok") == before + 1
+    assert _requests("probe_transform", "error") == 0  # the request itself was fine
+    # The refresh never completed, so it must not count as a successful one.
+    assert _refreshes("probe_transform", "ok") == 0
 
 
 def test_error_limit_headers_set_the_remain_gauge():

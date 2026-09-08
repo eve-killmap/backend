@@ -5,6 +5,7 @@ import pytest
 
 import app.routers.ws as ws_router
 from app import redis_client as rc
+from app.esi import STATUS
 from app.metrics import metrics
 from app.redis_client import broadcaster
 
@@ -335,15 +336,16 @@ class _FakeWS:
         self.closed = (code, reason)
 
 
-async def _ok_guard(_ws):
+async def _ok_guard(_ws, _transport):
     return True
 
 
 def _patch_status_cache(monkeypatch, value):
-    async def fake_cached():
+    async def fake_cached(feed):
+        assert feed is STATUS
         return value
 
-    monkeypatch.setattr(ws_router.esi_client, "get_status_cached", fake_cached)
+    monkeypatch.setattr(ws_router.esi_client, "get_cached", fake_cached)
 
 
 def test_ws_status_sends_cached_snapshot_on_connect(monkeypatch):
@@ -380,6 +382,60 @@ def test_ws_status_releases_slot_on_abnormal_disconnect(monkeypatch):
     assert broadcaster._status_subs == set()
 
 
+def _ws_conn(transport, outcome):
+    from prometheus_client import REGISTRY
+
+    return (
+        REGISTRY.get_sample_value(
+            "eve_killmap_ws_connections_total",
+            {"transport": transport, "outcome": outcome},
+        )
+        or 0.0
+    )
+
+
+def test_status_endpoint_guard_outcomes_are_labeled_ws_status(monkeypatch):
+    """live_clients already distinguishes ws_status; the guard counters must too,
+    or the status endpoint's accepts and rejections hide inside the kill series."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(ws_router, "origin_allowed", lambda *_: True)
+    monkeypatch.setattr(ws_router, "broadcaster", SimpleNamespace(is_running=True))
+    outcomes = ("accepted", "rejected_capacity")
+    before = {o: _ws_conn("ws_status", o) for o in outcomes}
+    kill_before = {o: _ws_conn("ws", o) for o in outcomes}
+
+    assert asyncio.run(ws_router._ws_guard(_FakeWS(), "ws_status")) is True
+    monkeypatch.setattr(
+        ws_router.metrics,
+        "ws_status_connections",
+        ws_router.config.limits.max_ws_connections,
+    )
+    asyncio.run(ws_router.ws_universe_status(_FakeWS()))  # rejected at capacity
+
+    assert _ws_conn("ws_status", "accepted") - before["accepted"] == 1
+    assert _ws_conn("ws_status", "rejected_capacity") - before["rejected_capacity"] == 1
+    assert all(_ws_conn("ws", o) - kill_before[o] == 0 for o in outcomes)
+
+
+def test_kill_endpoint_guard_still_reports_transport_ws(monkeypatch):
+    """transport="ws" is the series the dashboards already query: the status socket
+    gets a new label rather than renaming or splitting the killstream's."""
+    monkeypatch.setattr(ws_router, "origin_allowed", lambda *_: True)
+    monkeypatch.setattr(
+        ws_router.metrics,
+        "ws_global_connections",
+        ws_router.config.limits.max_ws_connections,
+    )
+    before = _ws_conn("ws", "rejected_capacity")
+    status_before = _ws_conn("ws_status", "rejected_capacity")
+
+    asyncio.run(ws_router.ws_kills_live(_FakeWS()))
+
+    assert _ws_conn("ws", "rejected_capacity") - before == 1
+    assert _ws_conn("ws_status", "rejected_capacity") - status_before == 0
+
+
 def test_ws_guard_counts_status_sockets_toward_capacity(monkeypatch):
     """A status socket costs a connection slot like any other."""
     monkeypatch.setattr(ws_router, "origin_allowed", lambda *_: True)
@@ -389,5 +445,5 @@ def test_ws_guard_counts_status_sockets_toward_capacity(monkeypatch):
         ws_router.config.limits.max_ws_connections,
     )
     sock = _FakeWS()
-    assert asyncio.run(ws_router._ws_guard(sock)) is False
+    assert asyncio.run(ws_router._ws_guard(sock, "ws_status")) is False
     assert sock.closed == (1013, "Server at capacity")

@@ -17,7 +17,7 @@ from app.cache import (
 from app.http_cache import json_cache_response, binary_cache_response, compute_etag
 from app.binary_encoder import encode_kills_binary
 from app.positions import sanitize_position
-from app.esi import SYSTEM_JUMPS, esi_client
+from app.esi import SOV_MAP, SOV_STRUCTURES, SYSTEM_JUMPS, esi_client
 from app import prometheus_metrics
 from app.queries import fetch_raw_kills, fetch_farthest_kill, normalize_farthest_kill
 from app.models import (
@@ -158,7 +158,7 @@ async def get_system_sov(
         async with single_flight.lock(f"sov:{solar_system_id}"):
             res = await query_cache.get("sov", cache_params)
             if res is None:
-                sov_map = await esi_client.get_sov_map_cached()
+                sov_map: dict[int, dict] | None = await esi_client.get_cached(SOV_MAP)
                 if sov_map is None:
                     raise HTTPException(
                         status_code=503, detail="Sovereignty data warming up"
@@ -190,7 +190,9 @@ async def get_system_sov(
                             raise HTTPException(
                                 status_code=502, detail="Upstream service unavailable"
                             )
-                        adm_by_system = await esi_client.get_sov_structures_cached()
+                        adm_by_system: dict[int, dict] | None = (
+                            await esi_client.get_cached(SOV_STRUCTURES)
+                        )
                         rec = (adm_by_system or {}).get(solar_system_id)
                         result = SovResponse(
                             claimed=True,

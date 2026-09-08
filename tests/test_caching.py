@@ -2,7 +2,7 @@ import asyncio
 import asyncio as _asyncio
 
 from app.cache import SingleFlight
-from app.esi import EsiClient
+from app.esi import SOV_MAP, EsiClient
 
 
 def test_single_flight_returns_same_lock_per_key():
@@ -27,16 +27,16 @@ class _FakeRedisStr:
         return self._value
 
 
-def test_get_sov_map_cached_int_keys():
+def test_get_cached_sov_map_int_keys():
     client = EsiClient()
     client._redis = _FakeRedisStr('{"30000142": {"system_id": 30000142}}')  # type: ignore[attr-defined]
-    result = _asyncio.run(client.get_sov_map_cached())
+    result = _asyncio.run(client.get_cached(SOV_MAP))
     assert result == {30000142: {"system_id": 30000142}}
 
 
-def test_get_sov_map_cached_none_without_redis():
+def test_get_cached_sov_map_none_without_redis():
     client = EsiClient()
-    assert _asyncio.run(client.get_sov_map_cached()) is None
+    assert _asyncio.run(client.get_cached(SOV_MAP)) is None
 
 
 from app.cache import should_short_circuit

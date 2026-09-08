@@ -96,7 +96,7 @@ def test_ws_guard_rejected_origin_metric():
         "eve_killmap_ws_connections_total",
         {"transport": "ws", "outcome": "rejected_origin"},
     )
-    ok = asyncio.run(_ws_guard(ws))
+    ok = asyncio.run(_ws_guard(ws, "ws"))
     assert ok is False
     assert (
         _sample(

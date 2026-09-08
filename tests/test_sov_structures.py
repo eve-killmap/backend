@@ -222,7 +222,7 @@ def test_refresh_falls_back_when_no_expires(monkeypatch):
 def test_get_cached_parses_and_misses():
     client = EsiClient()
     client._redis = None
-    assert asyncio.run(client.get_sov_structures_cached()) is None
+    assert asyncio.run(client.get_cached(SOV_STRUCTURES)) is None
 
     class _R:
         def __init__(self, v):
@@ -231,11 +231,11 @@ def test_get_cached_parses_and_misses():
         async def get(self, k):
             return self._v
 
-    # get_sov_structures_cached is a passthrough; values are epoch ints post-conversion.
+    # SOV_STRUCTURES decodes only the keys; values are epoch ints post-conversion.
     client._redis = _R('{"30000142": {"adm": 6.0, "start": 100, "end": 200}}')
-    assert asyncio.run(client.get_sov_structures_cached()) == {
+    assert asyncio.run(client.get_cached(SOV_STRUCTURES)) == {
         30000142: {"adm": 6.0, "start": 100, "end": 200}
     }
 
     client._redis = _R(None)  # key absent -> feed absent
-    assert asyncio.run(client.get_sov_structures_cached()) is None
+    assert asyncio.run(client.get_cached(SOV_STRUCTURES)) is None

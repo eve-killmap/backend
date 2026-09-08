@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 import app.routers.universe as uni
+from app.esi import SOV_MAP, SOV_STRUCTURES
 
 
 class _FakeQueryCache:
@@ -30,11 +31,11 @@ class _FakeEsi:
         self._adm = adm
         self.map_calls = 0
 
-    async def get_sov_map_cached(self):
-        self.map_calls += 1
-        return self._sov_map
-
-    async def get_sov_structures_cached(self):
+    async def get_cached(self, feed):
+        if feed is SOV_MAP:
+            self.map_calls += 1
+            return self._sov_map
+        assert feed is SOV_STRUCTURES
         return self._adm
 
 
@@ -127,7 +128,7 @@ def test_resolve_owner_names_db_then_esi_fallback(monkeypatch):
 
 
 def test_bulk_extracts_adm_from_structure_records(monkeypatch):
-    # get_sov_structures_cached now returns records; the endpoint must unpack the
+    # get_cached(SOV_STRUCTURES) now returns records; the endpoint must unpack the
     # adm float for build_sovereignty_response, and must NOT leak the window.
     records = {
         10: {"adm": 6.0, "start": "2026-08-19T09:30:00Z", "end": "2026-08-19T12:30:00Z"}

@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, WebSocket
 
 from app.config import config
-from app.esi import esi_client
+from app.esi import STATUS, esi_client
 from app.metrics import metrics
 from app.security import origin_allowed, at_capacity
 from app.redis_client import broadcaster
@@ -43,17 +43,20 @@ async def _ws_stream(
         await asyncio.gather(send_task, return_exceptions=True)
 
 
-async def _ws_guard(websocket: WebSocket) -> bool:
+async def _ws_guard(websocket: WebSocket, transport: str) -> bool:
     """Reject the socket (returns False) if the Origin is not allowed, the server
     is over its connection cap, or the broadcaster is not running.
     Otherwise returns True WITHOUT accepting; the caller accepts via _ws_stream.
-    On rejection the socket is already accepted+closed."""
+    On rejection the socket is already accepted+closed.
+
+    `transport` labels the outcome the same way live_clients labels the socket, so
+    the status endpoint's counts stay distinguishable from the killstream's."""
     origin = websocket.headers.get("origin")
     if not origin_allowed(origin, config.cors.allow_origins):
         await websocket.accept()
         await websocket.close(code=1008, reason="Origin not allowed")
         prometheus_metrics.ws_connections.labels(
-            transport="ws", outcome="rejected_origin"
+            transport=transport, outcome="rejected_origin"
         ).inc()
         return False
     current = (
@@ -65,24 +68,26 @@ async def _ws_guard(websocket: WebSocket) -> bool:
         await websocket.accept()
         await websocket.close(code=1013, reason="Server at capacity")
         prometheus_metrics.ws_connections.labels(
-            transport="ws", outcome="rejected_capacity"
+            transport=transport, outcome="rejected_capacity"
         ).inc()
         return False
     if not broadcaster.is_running:
         await websocket.accept()
         await websocket.close(code=1011, reason="Live streaming unavailable")
         prometheus_metrics.ws_connections.labels(
-            transport="ws", outcome="unavailable"
+            transport=transport, outcome="unavailable"
         ).inc()
         return False
-    prometheus_metrics.ws_connections.labels(transport="ws", outcome="accepted").inc()
+    prometheus_metrics.ws_connections.labels(
+        transport=transport, outcome="accepted"
+    ).inc()
     return True
 
 
 @router.websocket("/ws/global/kills")
 async def ws_kills_live(websocket: WebSocket):
     """Stream every new kill across all solar systems."""
-    if not await _ws_guard(websocket):
+    if not await _ws_guard(websocket, "ws"):
         return
     q = broadcaster.subscribe_global()
     try:
@@ -94,7 +99,7 @@ async def ws_kills_live(websocket: WebSocket):
 @router.websocket("/ws/systems/{solar_system_id}/kills")
 async def ws_system_kills(websocket: WebSocket, solar_system_id: int):
     """Stream new kills for a specific solar system."""
-    if not await _ws_guard(websocket):
+    if not await _ws_guard(websocket, "ws"):
         return
     q = broadcaster.subscribe_system(solar_system_id)
     try:
@@ -109,10 +114,10 @@ async def ws_universe_status(websocket: WebSocket):
 
     Sends the last known status immediately on connect. A cold cache sends nothing
     rather than reporting the cluster offline."""
-    if not await _ws_guard(websocket):
+    if not await _ws_guard(websocket, "ws_status"):
         return
     q = broadcaster.subscribe_status()
     try:
-        await _ws_stream(websocket, q, await esi_client.get_status_cached())
+        await _ws_stream(websocket, q, await esi_client.get_cached(STATUS))
     finally:
         broadcaster.unsubscribe_status(q)
