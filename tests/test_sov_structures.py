@@ -4,6 +4,7 @@ import aiohttp
 import pytest
 
 from app.esi import (
+    SOV_STRUCTURES,
     EsiClient,
     EsiTransientError,
     _is_transient_esi_error,
@@ -68,7 +69,7 @@ def test_fetch_structures_raises_transient_on_5xx():
         aiohttp.ClientResponseError(None, (), status=502, message="Bad Gateway")
     )
     with pytest.raises(EsiTransientError):
-        asyncio.run(client._fetch_sov_structures())
+        asyncio.run(client._fetch_json(SOV_STRUCTURES))
 
 
 def test_fetch_structures_raises_plain_runtimeerror_on_4xx():
@@ -77,7 +78,7 @@ def test_fetch_structures_raises_plain_runtimeerror_on_4xx():
         aiohttp.ClientResponseError(None, (), status=404, message="Not Found")
     )
     with pytest.raises(RuntimeError) as e:
-        asyncio.run(client._fetch_sov_structures())
+        asyncio.run(client._fetch_json(SOV_STRUCTURES))
     assert not isinstance(e.value, EsiTransientError)  # a real fault, stays loud
 
 
@@ -158,16 +159,19 @@ def test_reduce_captures_window_and_pairs_with_max_adm():
 
 
 def test_ttl_from_expires_header_then_fallback():
-    assert ttl_from_expires(None, 3600) == 3600
-    assert ttl_from_expires("not-a-date", 1234) == 1234
-    assert ttl_from_expires("Wed, 21 Oct 2099 07:28:00 GMT", 3600) >= 60
+    assert ttl_from_expires(None, 3600, floor=60) == 3600
+    assert ttl_from_expires("not-a-date", 1234, floor=60) == 1234
+    assert ttl_from_expires("Wed, 21 Oct 2099 07:28:00 GMT", 3600, floor=60) >= 60
 
 
 def test_refresh_stores_under_expires_ttl(monkeypatch):
     client = EsiClient()
 
-    async def fake_fetch():
-        return {30000142: 6.0}, "Wed, 21 Oct 2099 07:28:00 GMT"
+    async def fake_fetch(_feed):
+        return (
+            [{"solar_system_id": 30000142, "vulnerability_occupancy_level": 6.0}],
+            "Wed, 21 Oct 2099 07:28:00 GMT",
+        )
 
     captured = {}
 
@@ -177,11 +181,12 @@ def test_refresh_stores_under_expires_ttl(monkeypatch):
             captured["value"] = value
             captured["ex"] = ex
 
-    monkeypatch.setattr(client, "_fetch_sov_structures", fake_fetch)
+    monkeypatch.setattr(client, "_fetch_json", fake_fetch)
     client._redis = _FakeRedis()
     ttl = asyncio.run(client.refresh_sov_structures())
     assert captured["key"] == "esi:sov_structures"
-    assert captured["ex"] == ttl and ttl >= 60
+    assert ttl >= 60  # cadence still honors the Expires header
+    assert captured["ex"] == 7200  # retention is store_ttl, decoupled from cadence
 
 
 def test_refresh_falls_back_when_no_expires(monkeypatch):
@@ -191,8 +196,8 @@ def test_refresh_falls_back_when_no_expires(monkeypatch):
 
     client = EsiClient()
 
-    async def fake_fetch():
-        return {1: 1.0}, None  # no Expires header
+    async def fake_fetch(_feed):
+        return [], None  # no Expires header
 
     class _FakeRedis:
         async def set(self, *a, **k):
@@ -208,7 +213,7 @@ def test_refresh_falls_back_when_no_expires(monkeypatch):
         ),
     )
     monkeypatch.setattr("app.esi.config", patched)
-    monkeypatch.setattr(client, "_fetch_sov_structures", fake_fetch)
+    monkeypatch.setattr(client, "_fetch_json", fake_fetch)
     client._redis = _FakeRedis()
     assert asyncio.run(client.refresh_sov_structures()) == 4242
 
