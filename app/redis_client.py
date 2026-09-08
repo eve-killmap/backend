@@ -441,7 +441,9 @@ class KillBroadcaster:
                     json.dumps({"targets": list(feed.invalidate_targets)}),
                 )
             if feed.broadcast_channel:
-                await self._redis.publish(feed.broadcast_channel, json.dumps(value))
+                await self._redis.publish(
+                    feed.broadcast_channel, json.dumps(feed.decode(value))
+                )
         return min(max(ttl - feed.sleep_skew, feed.sleep_min), feed.sleep_max)
 
     def _retry_delay(self, failures: int) -> int:

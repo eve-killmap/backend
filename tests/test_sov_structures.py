@@ -183,7 +183,7 @@ def test_refresh_stores_under_expires_ttl(monkeypatch):
 
     monkeypatch.setattr(client, "_fetch_json", fake_fetch)
     client._redis = _FakeRedis()
-    ttl = asyncio.run(client.refresh_sov_structures())
+    ttl, _ = asyncio.run(client.refresh(SOV_STRUCTURES))
     assert captured["key"] == "esi:sov_structures"
     assert ttl >= 60  # cadence still honors the Expires header
     assert captured["ex"] == 7200  # retention is store_ttl, decoupled from cadence
@@ -205,7 +205,7 @@ def test_refresh_falls_back_when_no_expires(monkeypatch):
 
     # CacheConfig is a frozen dataclass — build a replacement with a distinctive
     # fallback TTL and point app.esi's config reference at it, proving
-    # refresh_sov_structures reads that specific field.
+    # refresh(SOV_STRUCTURES) reads that specific field.
     patched = dataclasses.replace(
         real_config,
         cache=dataclasses.replace(
@@ -215,7 +215,8 @@ def test_refresh_falls_back_when_no_expires(monkeypatch):
     monkeypatch.setattr("app.esi.config", patched)
     monkeypatch.setattr(client, "_fetch_json", fake_fetch)
     client._redis = _FakeRedis()
-    assert asyncio.run(client.refresh_sov_structures()) == 4242
+    ttl, _ = asyncio.run(client.refresh(SOV_STRUCTURES))
+    assert ttl == 4242
 
 
 def test_get_cached_parses_and_misses():

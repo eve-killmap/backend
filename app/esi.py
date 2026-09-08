@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 ESI_BASE = "https://esi.evetech.net/latest"
 
+# ESI's error-limit window is 60s, so a larger X-ESI-Error-Limit-Reset is bogus. It is
+# clamped because the cooldown is client-wide: an unbounded value stalls every feed.
+ESI_ERROR_LIMIT_MAX_RESET = 60
+
 
 class EsiTransientError(RuntimeError):
     """ESI was transiently unavailable (5xx / connection / timeout) -- e.g. during
@@ -219,19 +223,31 @@ class EsiClient:
 
     def _record_error_limit(self, headers) -> None:
         remain = headers.get("X-ESI-Error-Limit-Remain")
-        reset = headers.get("X-ESI-Error-Limit-Reset")
         if remain is None:
             return
         try:
             remain_i = int(remain)
-        except ValueError:
+        except (TypeError, ValueError):
             return
         pm.esi_error_limit_remain.set(remain_i)
-        if remain_i <= 10 and reset is not None:
-            try:
-                self._error_limit_reset_at = time.monotonic() + int(reset)
-            except ValueError:
-                pass
+        if remain_i > 10:
+            return
+        try:
+            reset_i = int(headers.get("X-ESI-Error-Limit-Reset"))
+        except (TypeError, ValueError):
+            return
+        reset_i = min(max(reset_i, 0), ESI_ERROR_LIMIT_MAX_RESET)
+        if reset_i == 0:
+            return
+        now = time.monotonic()
+        if now >= self._error_limit_reset_at:
+            logger.warning(
+                "ESI error limit engaged: %s errors remaining, "
+                "pausing ESI requests for %ss",
+                remain_i,
+                reset_i,
+            )
+        self._error_limit_reset_at = max(self._error_limit_reset_at, now + reset_i)
 
     async def _store(self, feed: EsiFeed, value: Any, ttl: int) -> None:
         if self._redis is None:
@@ -282,16 +298,8 @@ class EsiClient:
         pm.esi_cache_hits.labels(entity=feed.name).inc()
         return feed.decode(json.loads(cached))
 
-    async def refresh_sov_map(self) -> int:
-        ttl, _ = await self.refresh(SOV_MAP)
-        return ttl
-
     async def get_sov_map_cached(self) -> dict[int, dict] | None:
         return await self.get_cached(SOV_MAP)
-
-    async def refresh_sov_structures(self) -> int:
-        ttl, _ = await self.refresh(SOV_STRUCTURES)
-        return ttl
 
     async def get_sov_structures_cached(self) -> dict[int, dict] | None:
         return await self.get_cached(SOV_STRUCTURES)

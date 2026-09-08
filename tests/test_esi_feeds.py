@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 
 import pytest
@@ -25,6 +26,7 @@ class _FakeRedis:
     def __init__(self):
         self.store: dict[str, str] = {}
         self.expires: dict[str, int] = {}
+        self.published: list[tuple[str, str]] = []
 
     async def set(self, key, value, ex=None):
         self.store[key] = value
@@ -32,6 +34,46 @@ class _FakeRedis:
 
     async def get(self, key):
         return self.store.get(key)
+
+    async def publish(self, channel, data):
+        self.published.append((channel, data))
+
+
+class _FakeResponse:
+    def __init__(self, headers, payload=None):
+        self.headers = headers
+        self._payload = payload if payload is not None else {"n": 1}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def raise_for_status(self):
+        pass
+
+    async def json(self):
+        return self._payload
+
+
+class _FakeSession:
+    def __init__(self, response):
+        self._response = response
+        self.requests: list[str] = []
+
+    def get(self, url):
+        self.requests.append(url)
+        return self._response
+
+
+def _limit_headers(remain=None, reset=None) -> dict[str, str]:
+    headers = {}
+    if remain is not None:
+        headers["X-ESI-Error-Limit-Remain"] = remain
+    if reset is not None:
+        headers["X-ESI-Error-Limit-Reset"] = reset
+    return headers
 
 
 def _feed(**overrides) -> EsiFeed:
@@ -188,3 +230,109 @@ def test_get_cached_missing_returns_none():
     client = esi_mod.EsiClient()
     client._redis = _FakeRedis()
     assert asyncio.run(client.get_cached(_feed())) is None
+
+
+def test_broadcast_publishes_the_decoded_value(monkeypatch):
+    """The connect snapshot (get_cached) and the broadcast frames must agree; a feed
+    with a non-identity decode would otherwise ship two different key types."""
+    feed = _feed(
+        name="probe_broadcast",
+        decode=lambda raw: {**raw, "decoded": True},
+        broadcast_channel="probe:broadcast",
+    )
+    client = esi_mod.EsiClient()
+    fake = _FakeRedis()
+    client._redis = fake
+
+    async def fake_fetch(_feed):
+        return {"n": 3}, None
+
+    monkeypatch.setattr(client, "_fetch_json", fake_fetch)
+    monkeypatch.setattr(rc, "esi_client", client)
+    broadcaster = rc.KillBroadcaster()
+    broadcaster._redis = fake
+    asyncio.run(broadcaster._esi_refresh_once(feed))
+
+    channel, data = fake.published[0]
+    assert channel == "probe:broadcast"
+    assert json.loads(data) == {"n": 3, "decoded": True}
+    assert json.loads(data) == asyncio.run(client.get_cached(feed))
+
+
+def test_error_limit_headers_set_the_remain_gauge():
+    client = esi_mod.EsiClient()
+    client._record_error_limit(_limit_headers(remain="87"))
+
+    assert REGISTRY.get_sample_value("eve_killmap_esi_error_limit_remain") == 87
+    assert client._error_limit_reset_at == 0.0  # headroom left: no cooldown
+
+
+def test_error_limit_reset_is_clamped_to_the_window(monkeypatch):
+    """An absurd Reset would otherwise park every feed on this client for its whole
+    span, since the cooldown is client-wide and waited on before every request."""
+    monkeypatch.setattr(esi_mod.time, "monotonic", lambda: 1000.0)
+    assert esi_mod.ESI_ERROR_LIMIT_MAX_RESET == 60  # ESI's actual window
+
+    client = esi_mod.EsiClient()
+    client._record_error_limit(_limit_headers(remain="1", reset="86400"))
+    assert client._error_limit_reset_at == 1060.0
+
+    # a reset inside the window is honored verbatim, not flattened to the ceiling
+    plausible = esi_mod.EsiClient()
+    plausible._record_error_limit(_limit_headers(remain="1", reset="12"))
+    assert plausible._error_limit_reset_at == 1012.0
+
+
+@pytest.mark.parametrize(
+    "remain,reset",
+    [
+        ("2", "soon"),
+        ("2", None),
+        ("2", ""),
+        ("2", "-90"),
+        ("nope", "30"),
+        (None, "30"),
+    ],
+)
+def test_error_limit_malformed_headers_set_no_deadline(monkeypatch, remain, reset):
+    monkeypatch.setattr(esi_mod.time, "monotonic", lambda: 1000.0)
+    client = esi_mod.EsiClient()
+    client._record_error_limit(_limit_headers(remain=remain, reset=reset))
+    assert client._error_limit_reset_at == 0.0
+
+
+def test_error_limit_warns_once_when_the_cooldown_engages(monkeypatch, caplog):
+    monkeypatch.setattr(esi_mod.time, "monotonic", lambda: 1000.0)
+    client = esi_mod.EsiClient()
+    with caplog.at_level(logging.WARNING, logger="app.esi"):
+        client._record_error_limit(_limit_headers(remain="3", reset="86400"))
+        client._record_error_limit(_limit_headers(remain="2", reset="86400"))
+
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1  # once per engagement, not once per response
+    message = warnings[0].getMessage()
+    assert "3" in message and "60" in message  # remaining errors and clamped reset
+
+
+def test_error_limit_cooldown_delays_the_next_request(monkeypatch):
+    slept: list[float] = []
+
+    async def fake_sleep(delay):
+        slept.append(delay)
+
+    session = _FakeSession(_FakeResponse(_limit_headers(remain="1", reset="86400")))
+
+    async def fake_get_session():
+        return session
+
+    client = esi_mod.EsiClient()
+    monkeypatch.setattr(client, "_get_session", fake_get_session)
+    monkeypatch.setattr(esi_mod.asyncio, "sleep", fake_sleep)
+    feed = _feed(name="probe_cooldown")
+
+    asyncio.run(client._fetch_json(feed))
+    assert slept == []  # nothing to wait for until the limit is known
+
+    asyncio.run(client._fetch_json(feed))
+    assert len(slept) == 1
+    assert slept[0] == pytest.approx(esi_mod.ESI_ERROR_LIMIT_MAX_RESET, abs=1)
