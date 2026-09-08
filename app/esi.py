@@ -321,9 +321,7 @@ SOV_STRUCTURES = EsiFeed(
     redis_key="esi:sov_structures",
     fallback_ttl=lambda: config.cache.esi_sov_structures_fallback_ttl,
     ttl_floor=60,
-    transform=lambda data: {
-        str(k): v for k, v in _reduce_sov_structures(data).items()
-    },
+    transform=lambda data: {str(k): v for k, v in _reduce_sov_structures(data).items()},
     decode=_int_keyed,
     sleep_skew=60,
     sleep_min=60,

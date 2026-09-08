@@ -36,9 +36,7 @@ async def fetch_global_kills(map_type: str, bins: int) -> list[int]:
     return out
 
 
-async def fetch_filtered_global_kills(
-    f: Filter, map_type: str, bins: int
-) -> list[int]:
+async def fetch_filtered_global_kills(f: Filter, map_type: str, bins: int) -> list[int]:
     lo, hi = MAP_RANGES[map_type]  # KeyError -> caller maps to 400
     pm.filter_conditions.observe(len(f.conditions))
     sql, params = build_global_kills_sql(f, lo, hi, bins, EARLIEST_KILL_DATE)

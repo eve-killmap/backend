@@ -136,9 +136,7 @@ async def get_system_kills_stats(
     own TTL."""
     etag, gzipped, body = await build_system_kills(start, end, flt)
     ttl = config.cache.rankings_ttl if flt.is_empty else config.cache.filtered_map_ttl
-    return json_cache_response(
-        body, gzipped, etag, ttl, if_none_match, revalidate=True
-    )
+    return json_cache_response(body, gzipped, etag, ttl, if_none_match, revalidate=True)
 
 
 async def build_system_jumps() -> tuple[str, bool, bytes]:
@@ -153,9 +151,7 @@ async def build_system_jumps() -> tuple[str, bool, bytes]:
             if res is None:
                 jumps = await esi_client.get_cached(SYSTEM_JUMPS)
                 if jumps is None:
-                    raise HTTPException(
-                        status_code=503, detail="jump data warming up"
-                    )
+                    raise HTTPException(status_code=503, detail="jump data warming up")
                 ordered = sorted(jumps.items())
                 result = SystemJumpsResponse(
                     system_ids=[sid for sid, _ in ordered],
@@ -223,9 +219,7 @@ async def build_global_kills(
             res = await query_cache.get(prefix, params)
             if res is None:
                 counts = await builder()
-                res = await query_cache.set(
-                    prefix, params, json.dumps(counts), ttl=ttl
-                )
+                res = await query_cache.set(prefix, params, json.dumps(counts), ttl=ttl)
     return res
 
 
@@ -247,6 +241,4 @@ async def get_global_kills(
     n = bins if bins is not None else config.limits.global_kills_default_bins
     etag, gzipped, body = await build_global_kills(map, n, flt)
     ttl = config.cache.rankings_ttl if flt.is_empty else config.cache.filtered_map_ttl
-    return json_cache_response(
-        body, gzipped, etag, ttl, if_none_match, revalidate=True
-    )
+    return json_cache_response(body, gzipped, etag, ttl, if_none_match, revalidate=True)

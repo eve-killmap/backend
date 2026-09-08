@@ -38,7 +38,9 @@ def test_refresh_once_publishes_invalidation_and_returns_cadence(monkeypatch):
     assert json.loads(data)["targets"] == ["sov", "sov_map"]
     # the ok counter is incremented inside esi_client.refresh, which is faked here
     assert (
-        _sample("eve_killmap_esi_feed_refreshes_total", {"feed": "sov", "outcome": "ok"})
+        _sample(
+            "eve_killmap_esi_feed_refreshes_total", {"feed": "sov", "outcome": "ok"}
+        )
         == ok0
     )
 

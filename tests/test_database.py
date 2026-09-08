@@ -11,7 +11,9 @@ from app.config import config as real_config
 
 def _patch_dsn(monkeypatch):
     # Avoid depending on a real DATABASE_URL in the test environment.
-    monkeypatch.setattr(database_mod, "require_database_url", lambda _c: "postgres://test")
+    monkeypatch.setattr(
+        database_mod, "require_database_url", lambda _c: "postgres://test"
+    )
 
 
 def test_connect_retries_transient_then_succeeds(monkeypatch):
@@ -75,14 +77,14 @@ def test_connect_gives_up_after_budget_and_raises(monkeypatch):
     _patch_dsn(monkeypatch)
     patched = dataclasses.replace(
         real_config,
-        database=dataclasses.replace(
-            real_config.database, connect_max_retry_seconds=0
-        ),
+        database=dataclasses.replace(real_config.database, connect_max_retry_seconds=0),
     )
     monkeypatch.setattr(database_mod, "config", patched)
 
     calls = {"n": 0}
-    exc = asyncpg.exceptions.CannotConnectNowError("the database system is shutting down")
+    exc = asyncpg.exceptions.CannotConnectNowError(
+        "the database system is shutting down"
+    )
 
     async def always_fail(*_a, **_k):
         calls["n"] += 1

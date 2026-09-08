@@ -232,9 +232,7 @@ def test_filtered_global_kills_records_metrics(monkeypatch):
 
     fake = _FakeDb([])
     monkeypatch.setattr(gk, "db", fake)
-    q0 = _hist_count(
-        "eve_killmap_facet_query_seconds_count", {"query": "global_kills"}
-    )
+    q0 = _hist_count("eve_killmap_facet_query_seconds_count", {"query": "global_kills"})
     c0 = _hist_count("eve_killmap_filter_conditions_count")
     f = parse_filter(["alliance:attacker:99005338"], **_L)
     asyncio.run(gk.fetch_filtered_global_kills(f, "new-eden", 10))

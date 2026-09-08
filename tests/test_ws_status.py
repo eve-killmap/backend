@@ -41,7 +41,9 @@ def test_status_fanout_does_not_touch_kill_subscribers():
 def _count_fanouts(monkeypatch) -> dict[str, int]:
     seen = {"kills": 0, "status": 0}
     monkeypatch.setattr(
-        rc.broadcaster, "_fanout", lambda p: seen.__setitem__("kills", seen["kills"] + 1)
+        rc.broadcaster,
+        "_fanout",
+        lambda p: seen.__setitem__("kills", seen["kills"] + 1),
     )
     monkeypatch.setattr(
         rc.broadcaster,
@@ -136,9 +138,7 @@ def _kill_message(killmail_id):
     return {
         "type": "message",
         "channel": rc.config.streaming.pubsub_channel,
-        "data": json.dumps(
-            {"solar_system_id": 30000142, "killmail_id": killmail_id}
-        ),
+        "data": json.dumps({"solar_system_id": 30000142, "killmail_id": killmail_id}),
     }
 
 
