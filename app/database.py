@@ -40,6 +40,7 @@ class Database:
                     dsn=dsn,
                     min_size=config.database.pool_min_size,
                     max_size=config.database.pool_max_size,
+                    server_settings={"timezone": "UTC"},
                 )
             except _TRANSIENT_CONNECT_ERRORS as exc:
                 if time.monotonic() >= deadline:

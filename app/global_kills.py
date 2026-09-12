@@ -21,7 +21,7 @@ async def fetch_global_kills(map_type: str, bins: int) -> list[int]:
         f"""
         SELECT {_bin_expr("day", "$3", "$4")} AS bin,
                SUM(kill_count) AS kill_count
-        FROM mv_kills_per_system_daily
+        FROM system_kills_daily
         WHERE solar_system_id >= $1 AND solar_system_id < $2
         GROUP BY bin
         """,

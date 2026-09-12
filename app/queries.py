@@ -224,7 +224,7 @@ async def fetch_top_systems(limit: int = 10) -> TopSystems:
         # never from user input, so this f-string is safe.
         return await db.fetch(
             "SELECT solar_system_id, SUM(kill_count) AS kill_count "
-            "FROM mv_kills_per_system_daily "
+            "FROM system_kills_daily "
             f"WHERE day > CURRENT_DATE - INTERVAL '{iv}' "
             "GROUP BY solar_system_id ORDER BY kill_count DESC, solar_system_id LIMIT $1",
             limit,
@@ -286,7 +286,7 @@ async def fetch_system_kills(
         where = " AND ".join(conds)
         rows = await db.fetch(
             "SELECT solar_system_id, SUM(kill_count) AS kill_count "
-            f"FROM mv_kills_per_system_daily WHERE {where} "
+            f"FROM system_kills_daily WHERE {where} "
             "GROUP BY solar_system_id ORDER BY solar_system_id",
             *args,
         )

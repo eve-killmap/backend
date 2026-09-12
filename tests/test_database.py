@@ -121,3 +121,20 @@ def test_connect_does_not_retry_non_transient(monkeypatch):
     with pytest.raises(asyncpg.exceptions.InvalidPasswordError):
         asyncio.run(db.connect())
     assert calls["n"] == 1
+
+
+def test_pool_pins_session_timezone_to_utc(monkeypatch):
+    # Rollup "days" are defined in the session zone. The pin must travel in the
+    # startup packet (server_settings): asyncpg runs RESET ALL on every pool
+    # release, which would undo a SET issued from an init callback.
+    _patch_dsn(monkeypatch)
+    captured: dict = {}
+
+    async def fake_create_pool(*_a, **kwargs):
+        captured.update(kwargs)
+        return "POOL"
+
+    monkeypatch.setattr(database_mod.asyncpg, "create_pool", fake_create_pool)
+    asyncio.run(Database().connect())
+    assert captured["server_settings"] == {"timezone": "UTC"}
+    assert "init" not in captured and "setup" not in captured

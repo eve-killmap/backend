@@ -31,6 +31,8 @@ def test_map_ranges_filter_by_id_range(monkeypatch):
     assert (
         "solar_system_id" in fake.sql and "/ 1000000" not in fake.sql
     )  # range, not digit
+    assert "FROM system_kills_daily" in fake.sql
+    assert "mv_kills_per_system_daily" not in fake.sql
 
 
 def test_zero_filled_dense_array(monkeypatch):

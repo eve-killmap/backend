@@ -342,7 +342,8 @@ def test_fetch_system_kills_windowed_uses_daily_rollup(monkeypatch):
 
     monkeypatch.setattr(q, "db", _FakeDb())
     asyncio.run(q.fetch_system_kills(date(2026, 1, 1), date(2026, 3, 1)))
-    assert "mv_kills_per_system_daily" in captured["sql"]
+    assert "FROM system_kills_daily" in captured["sql"]
+    assert "mv_kills_per_system_daily" not in captured["sql"]
     assert "day >=" in captured["sql"] and "day <" in captured["sql"]
     assert captured["args"] == (date(2026, 1, 1), date(2026, 3, 1))
 
@@ -365,6 +366,7 @@ def test_fetch_system_kills_no_window_uses_alltime(monkeypatch):
         or "mv_kills_per_system\n" in captured["sql"]
     )
     assert "mv_kills_per_system_daily" not in captured["sql"]
+    assert "system_kills_daily" not in captured["sql"]
 
 
 def test_top_systems_windowed_intervals_use_rollup(monkeypatch):
@@ -381,7 +383,8 @@ def test_top_systems_windowed_intervals_use_rollup(monkeypatch):
     monkeypatch.setattr(q, "db", _FakeDb())
     asyncio.run(q.fetch_top_systems(limit=10))
     joined = "\n".join(seen)
-    assert "mv_kills_per_system_daily" in joined  # windowed intervals
+    assert "FROM system_kills_daily" in joined  # windowed intervals
+    assert "mv_kills_per_system_daily" not in joined
     assert (
         "mv_kills_per_system " in joined or "FROM mv_kills_per_system\n" in joined
     )  # all
