@@ -27,9 +27,6 @@ router = APIRouter()
 _ALLIANCE, _CORP, _FACTION = 0, 1, 2
 _ADM_FALLBACK = 3.0
 _ADM_PER_SYSTEM_DEFAULT = 1.0
-# Short enough to stay well inside the leader's ~28s refresh cadence, long enough
-# for the edge to collapse a crowd of pollers into ~one origin request per window.
-_STATUS_MAX_AGE = 15
 
 
 def _owner_of(record: dict) -> tuple[int, int] | None:
@@ -272,5 +269,5 @@ async def get_universe_status(
     payload = UniverseStatus.model_validate(status)
     body = payload.model_dump_json(exclude_none=True).encode()
     return json_cache_response(
-        body, False, compute_etag(body), _STATUS_MAX_AGE, if_none_match
+        body, False, compute_etag(body), config.cache.status_max_age, if_none_match
     )

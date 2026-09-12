@@ -171,7 +171,7 @@ esi_error_limit_remain = Gauge(
 broadcaster_subscriber_connected = Gauge(
     "eve_killmap_broadcaster_subscriber_connected",
     "1 while this worker's pubsub subscriber is subscribed and delivering, else 0 "
-    "(0 means live kill and status sockets are rejected on this worker).",
+    "(0 means live kill sockets are rejected on this worker).",
 )
 broadcaster_subscriber_reconnects = Counter(
     "eve_killmap_broadcaster_subscriber_reconnects",

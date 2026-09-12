@@ -413,6 +413,7 @@ def test_esi_feed_and_jumps_defaults(tmp_path):
     assert cfg.cache.esi_status_fallback_ttl == 30
     assert cfg.cache.system_jumps_ttl == 3600
     assert cfg.cache.system_jumps_max_age == 900
+    assert cfg.cache.status_max_age == 15
     assert cfg.cache.esi_retry_initial_seconds == 30
     assert cfg.cache.esi_retry_max_seconds == 600
 

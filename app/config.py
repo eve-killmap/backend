@@ -87,6 +87,7 @@ class CacheConfig:
     esi_retry_initial_seconds: int
     esi_retry_max_seconds: int
     sov_max_age: int
+    status_max_age: int
     farthest_kill_max_age: int
     warm_on_signal: bool
 
@@ -398,6 +399,9 @@ def load_config(
         ),
         sov_max_age=_as_int(
             cache_cfg.get("sov_max_age", 900), "cache.sov_max_age", minimum=0
+        ),
+        status_max_age=_as_int(
+            cache_cfg.get("status_max_age", 15), "cache.status_max_age", minimum=0
         ),
         farthest_kill_max_age=_as_int(
             cache_cfg.get("farthest_kill_max_age", 3600),

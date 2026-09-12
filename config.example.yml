@@ -69,6 +69,10 @@ cache:
   # Browser/edge max-age for slow-changing sov + farthest_kill (decoupled from the
   # server cache TTLs above; bounds client staleness without per-request revalidation).
   sov_max_age: 900                       # sov + sov_map browser max-age (~15m)
+  # Cluster-status max-age. Short enough to stay well inside the leader's ~28s
+  # refresh cadence, long enough for the edge to collapse a crowd of pollers into
+  # roughly one origin request per window.
+  status_max_age: 15
   farthest_kill_max_age: 3600            # farthest_kill browser max-age (1h)
   warm_on_signal: true   # proactively warm MV-derived defaults on the leader
 
