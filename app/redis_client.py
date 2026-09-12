@@ -260,7 +260,6 @@ class KillBroadcaster:
     def __init__(self) -> None:
         self._global_subs: set[asyncio.Queue] = set()
         self._system_subs: dict[int, set[asyncio.Queue]] = {}
-        self._status_subs: set[asyncio.Queue] = set()
         self._redis: aioredis.Redis | None = None
         self._subscriber_task: asyncio.Task | None = None
         self._subscriber_connected: bool = False
@@ -434,20 +433,15 @@ class KillBroadcaster:
 
     async def _esi_refresh_once(self, feed: EsiFeed) -> int:
         """Refresh one feed, publish its side effects, and return the next sleep."""
-        ttl, value = await esi_client.refresh(feed)
+        ttl, _ = await esi_client.refresh(feed)
         pm.esi_feed_last_success_timestamp_seconds.labels(
             feed=feed.name
         ).set_to_current_time()
-        if self._redis is not None:
-            if feed.invalidate_targets:
-                await self._redis.publish(
-                    config.streaming.invalidate_channel,
-                    json.dumps({"targets": list(feed.invalidate_targets)}),
-                )
-            if feed.broadcast_channel:
-                await self._redis.publish(
-                    feed.broadcast_channel, json.dumps(feed.decode(value))
-                )
+        if self._redis is not None and feed.invalidate_targets:
+            await self._redis.publish(
+                config.streaming.invalidate_channel,
+                json.dumps({"targets": list(feed.invalidate_targets)}),
+            )
         return min(max(ttl - feed.sleep_skew, feed.sleep_min), feed.sleep_max)
 
     def _retry_delay(self, failures: int) -> int:
@@ -486,23 +480,32 @@ class KillBroadcaster:
         Backoff grows to _SUBSCRIBER_RETRY_MAX and resets once a connection has
         lasted _SUBSCRIBER_STABLE_SECONDS, so a flapping Redis cannot hot-spin."""
         assert self._redis is not None  # set in start() before task is created
-        channels = (config.streaming.pubsub_channel, config.streaming.status_channel)
+        channel = config.streaming.pubsub_channel
         delay = _SUBSCRIBER_RETRY_INITIAL
         while True:
             pubsub = self._redis.pubsub()
             started = time.monotonic()
             try:
-                await pubsub.subscribe(*channels)
+                await pubsub.subscribe(channel)
                 self._set_subscriber_connected(True)
                 async for message in pubsub.listen():
                     if message["type"] != "message":
+                        continue
+                    # Fail closed: a payload from anywhere else would raise in
+                    # _fanout on its missing solar_system_id, tearing the
+                    # subscription down and stalling delivery until the reconnect.
+                    if message["channel"] != channel:
+                        logger.warning(
+                            "Broadcaster: dropping message from channel %s",
+                            message["channel"],
+                        )
                         continue
                     try:
                         payload = json.loads(message["data"])
                     except Exception as exc:
                         logger.warning("Broadcaster: malformed pubsub message: %s", exc)
                         continue
-                    self._dispatch(message["channel"], payload)
+                    self._fanout(payload)
                 reason = "pubsub stream ended"
             except asyncio.CancelledError:
                 raise
@@ -512,7 +515,7 @@ class KillBroadcaster:
             finally:
                 self._set_subscriber_connected(False)
                 try:
-                    await pubsub.unsubscribe(*channels)
+                    await pubsub.unsubscribe(channel)
                     await pubsub.aclose()
                 except Exception:
                     pass
@@ -522,14 +525,6 @@ class KillBroadcaster:
             logger.warning("Broadcaster: %s; resubscribing in %.1fs", reason, delay)
             await asyncio.sleep(delay)
             delay = min(delay * 2, _SUBSCRIBER_RETRY_MAX)
-
-    def _dispatch(self, channel: str, payload: dict) -> None:
-        if channel == config.streaming.pubsub_channel:
-            self._fanout(payload)
-        elif channel == config.streaming.status_channel:
-            self._fanout_status(payload)
-        else:
-            logger.warning("Broadcaster: dropping message from channel %s", channel)
 
     def _push(self, subs: set[asyncio.Queue], payload: dict) -> set[asyncio.Queue]:
         """Deliver to every queue; return those that were full, so the caller can
@@ -557,9 +552,6 @@ class KillBroadcaster:
         dead = self._push(self._system_subs.get(system_id, set()), system_payload)
         if system_id in self._system_subs:
             self._system_subs[system_id] -= dead
-
-    def _fanout_status(self, payload: dict) -> None:
-        self._status_subs -= self._push(self._status_subs, payload)
 
     @property
     def is_running(self) -> bool:
@@ -591,20 +583,6 @@ class KillBroadcaster:
         if removed:
             metrics.ws_global_connections -= 1
             pm.live_clients.labels(transport="ws").dec()
-
-    def subscribe_status(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue(maxsize=100)
-        self._status_subs.add(q)
-        metrics.ws_status_connections += 1
-        pm.live_clients.labels(transport="ws_status").inc()
-        return q
-
-    def unsubscribe_status(self, q: asyncio.Queue) -> None:
-        removed = q in self._status_subs
-        self._status_subs.discard(q)
-        if removed:
-            metrics.ws_status_connections -= 1
-            pm.live_clients.labels(transport="ws_status").dec()
 
     def subscribe_system(self, system_id: int) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=100)

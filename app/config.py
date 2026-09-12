@@ -106,7 +106,6 @@ class StreamingConfig:
     stream_name: str
     pubsub_channel: str
     invalidate_channel: str
-    status_channel: str
 
 
 @dataclass(frozen=True)
@@ -446,7 +445,6 @@ def load_config(
         stream_name=stream_cfg.get("stream_name", "kills:live"),
         pubsub_channel=stream_cfg.get("pubsub_channel", "kills:enriched"),
         invalidate_channel=stream_cfg.get("invalidate_channel", "cache:invalidate"),
-        status_channel=stream_cfg.get("status_channel", "universe:status"),
     )
 
     expected_workers_raw = health_cfg.get("expected_workers")
@@ -476,7 +474,7 @@ def load_config(
             limits_cfg.get("max_name_ids", 100), "limits.max_name_ids", minimum=1
         ),
         max_ws_connections=_as_int(
-            limits_cfg.get("max_ws_connections", 2000),
+            limits_cfg.get("max_ws_connections", 1000),
             "limits.max_ws_connections",
             minimum=1,
         ),

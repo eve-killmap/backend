@@ -90,7 +90,6 @@ class EsiFeed:
     sleep_max: int
     store_ttl: Callable[[], int] | None = None
     invalidate_targets: tuple[str, ...] = ()
-    broadcast_channel: str | None = None
     offline_value: Any | None = None
     required: bool = True
 
@@ -360,7 +359,6 @@ STATUS = EsiFeed(
     sleep_min=15,
     sleep_max=60,
     store_ttl=lambda: 600,
-    broadcast_channel=config.streaming.status_channel,
     offline_value={"online": False},
 )
 

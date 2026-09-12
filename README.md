@@ -38,9 +38,9 @@ Endpoints (selected): `GET /kills/details/raw`, `GET /kills/details/processed`,
 `GET /systems/{id}/kills` (binary), `GET /systems/{id}/sov`,
 `GET /systems/{id}/jumps`, `GET /stats/system-rankings`,
 `GET /stats/system-jumps`, `GET /systems/{id}/farthest_kill`,
-`POST /universe/names`, WebSockets `/ws/global/kills`, `/ws/systems/{id}/kills`
-and `/ws/universe/status`, and health (below). Logs go to the rotating file at
-`LOG_FILE` (default `./backend.log`) and to stdout.
+`GET /universe/status`, `POST /universe/names`, WebSockets `/ws/global/kills`
+and `/ws/systems/{id}/kills`, and health (below). Logs go to the rotating file
+at `LOG_FILE` (default `./backend.log`) and to stdout.
 
 ## Configuration
 

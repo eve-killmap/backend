@@ -45,7 +45,9 @@ def test_refresh_once_publishes_invalidation_and_returns_cadence(monkeypatch):
     )
 
 
-def test_refresh_once_broadcasts_when_channel_set(monkeypatch):
+def test_refresh_once_of_status_returns_cadence_and_publishes_nothing(monkeypatch):
+    """STATUS invalidates no query cache and is read straight from Redis by
+    /universe/status, so refreshing it must stay a pure store + reschedule."""
     from app.esi import STATUS
 
     b = rc.KillBroadcaster()
@@ -58,8 +60,7 @@ def test_refresh_once_broadcasts_when_channel_set(monkeypatch):
     delay = asyncio.run(b._esi_refresh_once(STATUS))
 
     assert delay == 28  # clamp(30 - 2, 15, 60)
-    channels = [c for c, _ in b._redis.published]
-    assert rc.config.streaming.status_channel in channels
+    assert b._redis.published == []
 
 
 def test_retry_delay_backs_off_and_caps():

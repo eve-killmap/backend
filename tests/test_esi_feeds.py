@@ -239,33 +239,6 @@ def test_get_cached_missing_returns_none():
     assert asyncio.run(client.get_cached(_feed())) is None
 
 
-def test_broadcast_publishes_the_decoded_value(monkeypatch):
-    """The connect snapshot (get_cached) and the broadcast frames must agree; a feed
-    with a non-identity decode would otherwise ship two different key types."""
-    feed = _feed(
-        name="probe_broadcast",
-        decode=lambda raw: {**raw, "decoded": True},
-        broadcast_channel="probe:broadcast",
-    )
-    client = esi_mod.EsiClient()
-    fake = _FakeRedis()
-    client._redis = fake
-
-    async def fake_fetch(_feed):
-        return {"n": 3}, None
-
-    monkeypatch.setattr(client, "_fetch_json", fake_fetch)
-    monkeypatch.setattr(rc, "esi_client", client)
-    broadcaster = rc.KillBroadcaster()
-    broadcaster._redis = fake
-    asyncio.run(broadcaster._esi_refresh_once(feed))
-
-    channel, data = fake.published[0]
-    assert channel == "probe:broadcast"
-    assert json.loads(data) == {"n": 3, "decoded": True}
-    assert json.loads(data) == asyncio.run(client.get_cached(feed))
-
-
 def test_request_success_is_recorded_even_when_the_transform_fails(monkeypatch):
     """esi_requests describes the HTTP call, so a transform that raises afterwards
     must not erase the request's success -- the same split corporation/alliance use."""

@@ -16,7 +16,6 @@ def test_snapshot_has_expected_keys():
         "cache_misses",
         "ws_global_connections",
         "ws_system_connections",
-        "ws_status_connections",
         "broadcaster_role",
     }
     assert snap["broadcaster_role"] == "disabled"

@@ -13,7 +13,6 @@ class Metrics:
     cache_misses: int = 0
     ws_global_connections: int = 0
     ws_system_connections: int = 0
-    ws_status_connections: int = 0
     broadcaster_role: str = "disabled"  # "disabled" | "leader" | "follower"
 
     def snapshot(self) -> dict:
@@ -25,7 +24,6 @@ class Metrics:
             "cache_misses": self.cache_misses,
             "ws_global_connections": self.ws_global_connections,
             "ws_system_connections": self.ws_system_connections,
-            "ws_status_connections": self.ws_status_connections,
             "broadcaster_role": self.broadcaster_role,
         }
 

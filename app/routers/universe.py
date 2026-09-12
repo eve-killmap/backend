@@ -17,16 +17,19 @@ from app.id_ranges import (
     CATEGORY_ALLIANCE,
 )
 from app.eve_images import image_url
-from app.models import NameResolution, SovereigntyMapResponse
+from app.models import NameResolution, SovereigntyMapResponse, UniverseStatus
 from app.cache import query_cache, single_flight
-from app.esi import SOV_MAP, SOV_STRUCTURES, esi_client
-from app.http_cache import json_cache_response
+from app.esi import SOV_MAP, SOV_STRUCTURES, STATUS, esi_client
+from app.http_cache import json_cache_response, compute_etag
 
 router = APIRouter()
 
 _ALLIANCE, _CORP, _FACTION = 0, 1, 2
 _ADM_FALLBACK = 3.0
 _ADM_PER_SYSTEM_DEFAULT = 1.0
+# Short enough to stay well inside the leader's ~28s refresh cadence, long enough
+# for the edge to collapse a crowd of pollers into ~one origin request per window.
+_STATUS_MAX_AGE = 15
 
 
 def _owner_of(record: dict) -> tuple[int, int] | None:
@@ -251,4 +254,23 @@ async def get_sovereignty_map(
     etag, gzipped, body = res
     return json_cache_response(
         body, gzipped, etag, config.cache.sov_max_age, if_none_match
+    )
+
+
+@router.get("/universe/status", response_model=None)
+async def get_universe_status(
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
+):
+    """EVE cluster status, as the leader last read it from ESI: `players` is
+    present only while the cluster is online.
+
+    503 until the leader's first status refresh lands: a cold cache means "not
+    known yet", which must never be served as the cluster being offline."""
+    status = await esi_client.get_cached(STATUS)
+    if status is None:
+        raise HTTPException(status_code=503, detail="status data warming up")
+    payload = UniverseStatus.model_validate(status)
+    body = payload.model_dump_json(exclude_none=True).encode()
+    return json_cache_response(
+        body, False, compute_etag(body), _STATUS_MAX_AGE, if_none_match
     )

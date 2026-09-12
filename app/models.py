@@ -155,6 +155,11 @@ class SystemJumpCount(BaseModel):
     jumps: int
 
 
+class UniverseStatus(BaseModel):
+    online: bool
+    players: int | None = None  # omitted while the cluster is offline
+
+
 class SystemKillIdsResponse(BaseModel):
     count: int
     killmail_ids: list[int]

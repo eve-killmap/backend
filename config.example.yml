@@ -90,7 +90,6 @@ streaming:
   stream_name: kills:live          # Redis stream the backend tails
   pubsub_channel: kills:enriched   # internal fan-out channel between workers
   invalidate_channel: cache:invalidate   # cache-invalidation pub/sub
-  status_channel: universe:status       # leader -> workers server-status broadcasts
 
 health:
   # Per-worker heartbeat interval and key TTL (seconds). TTL should be >= 2x interval.
@@ -103,10 +102,8 @@ limits:
   # Input caps to bound abuse / resource use.
   max_killmail_ids: 100      # /kills/details/raw ids per request
   max_name_ids: 100          # POST /universe/names ids per request
-  # Per-process WebSocket connection cap, counting kill and status sockets alike.
-  # A client showing both live kills and cluster status holds two sockets, so this
-  # is roughly half as many concurrent viewers as its number suggests.
-  max_ws_connections: 2000
+  # Per-process cap on live kill WebSockets; a viewer holds one.
+  max_ws_connections: 1000
   max_filter_conditions: 8           # max f= conditions per faceted-filter request
   max_filter_ids_per_condition: 50   # max ids within a single f= condition
   autocomplete_min_length: 3         # minimum query length for autocomplete endpoints
