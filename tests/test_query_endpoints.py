@@ -325,6 +325,7 @@ def test_system_kills_response_is_single_count():
     r = SystemKillsResponse(system_ids=[1, 2], kills=[5, 0])
     assert r.kills == [5, 0]
     assert not hasattr(r, "day")  # six-bucket fields gone
+    assert r.computed_at is None
 
 
 def test_fetch_system_kills_windowed_uses_daily_rollup(monkeypatch):
@@ -339,6 +340,9 @@ def test_fetch_system_kills_windowed_uses_daily_rollup(monkeypatch):
             captured["sql"] = sql
             captured["args"] = args
             return []
+
+        async def fetchval(self, sql, *args):
+            return None
 
     monkeypatch.setattr(q, "db", _FakeDb())
     asyncio.run(q.fetch_system_kills(date(2026, 1, 1), date(2026, 3, 1)))
@@ -358,6 +362,9 @@ def test_fetch_system_kills_no_window_uses_alltime(monkeypatch):
         async def fetch(self, sql, *args):
             captured["sql"] = sql
             return []
+
+        async def fetchval(self, sql, *args):
+            return None
 
     monkeypatch.setattr(q, "db", _FakeDb())
     asyncio.run(q.fetch_system_kills(None, None))
@@ -486,3 +493,89 @@ def test_get_or_build_does_not_cache_a_failed_build(monkeypatch):
     assert builds["n"] == 2  # lock released after the failure; rebuilt on retry
     assert sets == [("p", {"a": 1}, "{}", 30)]
     assert res == ('"e"', False, b"{}")
+
+
+def test_rankings_body_carries_watermark_computed_at(monkeypatch):
+    import json as _json
+    from app.models import TopSystems
+
+    empty_top = TopSystems(all=[], day=[], week=[], month=[], six_months=[], year=[])
+
+    async def fake_get(prefix, params):
+        return None
+
+    async def fake_set(prefix, params, value, ttl=None):
+        return '"e"', False, value.encode()
+
+    async def fake_top(limit):
+        return empty_top
+
+    async def fake_bottom(limit):
+        return []
+
+    async def fake_watermark():
+        return 1757700000
+
+    monkeypatch.setattr(stats.query_cache, "get", fake_get)
+    monkeypatch.setattr(stats.query_cache, "set", fake_set)
+    monkeypatch.setattr(stats, "fetch_top_systems", fake_top)
+    monkeypatch.setattr(stats, "fetch_bottom_systems", fake_bottom)
+    monkeypatch.setattr(stats, "fetch_rollup_watermark", fake_watermark)
+
+    resp = asyncio.run(stats.get_system_rankings(limit=10, if_none_match=None))
+    body = _json.loads(resp.body)
+    assert body["computed_at"] == 1757700000
+    assert body["bottom"] == [] and body["top"]["day"] == []
+
+
+def test_rankings_body_omits_computed_at_without_watermark(monkeypatch):
+    import json as _json
+    from app.models import TopSystems
+
+    async def fake_get(prefix, params):
+        return None
+
+    async def fake_set(prefix, params, value, ttl=None):
+        return '"e"', False, value.encode()
+
+    async def fake_top(limit):
+        return TopSystems(all=[], day=[], week=[], month=[], six_months=[], year=[])
+
+    async def fake_bottom(limit):
+        return []
+
+    async def fake_watermark():
+        return None
+
+    monkeypatch.setattr(stats.query_cache, "get", fake_get)
+    monkeypatch.setattr(stats.query_cache, "set", fake_set)
+    monkeypatch.setattr(stats, "fetch_top_systems", fake_top)
+    monkeypatch.setattr(stats, "fetch_bottom_systems", fake_bottom)
+    monkeypatch.setattr(stats, "fetch_rollup_watermark", fake_watermark)
+
+    resp = asyncio.run(stats.get_system_rankings(limit=10, if_none_match=None))
+    assert "computed_at" not in _json.loads(resp.body)
+
+
+def test_system_kills_unfiltered_body_omits_null_computed_at(monkeypatch):
+    # exclude_none must be applied by the builder, not only by the model.
+    from app.models import SystemKillsResponse
+
+    captured = {}
+
+    async def fake_get(prefix, params):
+        return None
+
+    async def fake_set(prefix, params, value, ttl=None):
+        captured["value"] = value
+        return '"e"', False, value.encode()
+
+    async def fake_fetch(start=None, end=None):
+        return SystemKillsResponse(system_ids=[1], kills=[5])
+
+    monkeypatch.setattr(stats.query_cache, "get", fake_get)
+    monkeypatch.setattr(stats.query_cache, "set", fake_set)
+    monkeypatch.setattr(stats, "fetch_system_kills", fake_fetch)
+    flt = parse_filter([], max_conditions=8, max_ids=50)
+    asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
+    assert captured["value"] == '{"system_ids":[1],"kills":[5]}'

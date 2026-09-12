@@ -137,11 +137,13 @@ class TopSystems(BaseModel):
 
 
 class RankSystemsResponse(BaseModel):
+    computed_at: int | None = None
     top: TopSystems
     bottom: list[RankSystem]
 
 
 class SystemKillsResponse(BaseModel):
+    computed_at: int | None = None
     system_ids: list[int]
     kills: list[int]  # kills[i] belongs to system_ids[i]
 

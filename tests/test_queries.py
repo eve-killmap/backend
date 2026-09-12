@@ -71,9 +71,11 @@ class _FakeDbCapture:
     def __init__(self, value):
         self._value = value
         self.query = None
+        self.args = None
 
     async def fetchval(self, query, *args):
         self.query = query
+        self.args = args
         return self._value
 
 
@@ -89,13 +91,17 @@ def test_fetch_system_latest_inserted_floors_epoch(monkeypatch):
 
 
 class _FakeDbFetch:
-    def __init__(self, rows):
+    def __init__(self, rows, watermark=1757700000):
         self._rows = rows
+        self._watermark = watermark
         self.query = None
 
     async def fetch(self, query, *args):
         self.query = query
         return self._rows
+
+    async def fetchval(self, query, *args):
+        return self._watermark
 
 
 def test_fetch_system_kills_aligns_and_defaults(monkeypatch):
@@ -112,6 +118,7 @@ def test_fetch_system_kills_aligns_and_defaults(monkeypatch):
     assert result.kills == [100, 3]
     # kills is the same length as system_ids
     assert len(result.kills) == len(result.system_ids)
+    assert result.computed_at == 1757700000
 
     # Guard the SQL shape that makes alignment structural.
     q = fake.query
@@ -135,3 +142,25 @@ def test_fetch_raw_kills_since_is_unordered(monkeypatch):
     asyncio.run(queries.fetch_raw_kills(30000142, since=1700000000))
     assert "ORDER BY" not in fake.query
     assert "inserted_time > $2" in fake.query
+
+
+def test_fetch_rollup_watermark_reads_the_shared_row(monkeypatch):
+    fake = _FakeDbCapture(1757700000)
+    monkeypatch.setattr(queries, "db", fake)
+    assert asyncio.run(queries.fetch_rollup_watermark()) == 1757700000
+    assert "FROM rollup_state" in fake.query
+    assert "FLOOR(EXTRACT(EPOCH FROM watermark))" in fake.query
+    assert fake.args == (queries.ROLLUP_WATERMARK_NAME,)
+    assert queries.ROLLUP_WATERMARK_NAME == "entity_kills_daily"
+
+
+def test_fetch_rollup_watermark_none_before_backfill(monkeypatch):
+    monkeypatch.setattr(queries, "db", _FakeDbCapture(None))
+    assert asyncio.run(queries.fetch_rollup_watermark()) is None
+
+
+def test_fetch_system_kills_omits_computed_at_without_watermark(monkeypatch):
+    monkeypatch.setattr(queries, "db", _FakeDbFetch([], watermark=None))
+    result = asyncio.run(queries.fetch_system_kills())
+    assert result.computed_at is None
+    assert "computed_at" not in result.model_dump_json(exclude_none=True)

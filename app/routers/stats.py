@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import date, datetime
 from typing import Annotated, Awaitable, Callable
@@ -10,7 +11,12 @@ from app.esi import SYSTEM_JUMPS, esi_client
 from app.global_kills import fetch_global_kills, fetch_filtered_global_kills, MAP_RANGES
 from app.http_cache import json_cache_response
 from app.models import RankSystemsResponse, SystemJumpsResponse
-from app.queries import fetch_top_systems, fetch_bottom_systems, fetch_system_kills
+from app.queries import (
+    fetch_top_systems,
+    fetch_bottom_systems,
+    fetch_system_kills,
+    fetch_rollup_watermark,
+)
 from app.routers.dependencies import get_filter
 from app.filters import Filter
 from app.facet_queries import fetch_filtered_map
@@ -55,9 +61,14 @@ async def build_system_rankings(limit: int) -> tuple[str, bool, bytes]:
     """
 
     async def build() -> str:
-        top = await fetch_top_systems(limit=limit)
-        bottom = await fetch_bottom_systems(limit=limit)
-        return RankSystemsResponse(top=top, bottom=bottom).model_dump_json()
+        top, bottom, computed_at = await asyncio.gather(
+            fetch_top_systems(limit=limit),
+            fetch_bottom_systems(limit=limit),
+            fetch_rollup_watermark(),
+        )
+        return RankSystemsResponse(
+            computed_at=computed_at, top=top, bottom=bottom
+        ).model_dump_json(exclude_none=True)
 
     return await _get_or_build(
         "system_rankings",
@@ -75,7 +86,9 @@ async def get_system_rankings(
     ] = config.limits.system_rankings_default_limit,
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ):
-    """Get rank list of solar systems by highest/lowest number of kills."""
+    """Get rank list of solar systems by highest/lowest number of kills.
+    `computed_at` is the epoch of process-kills' rollup watermark (omitted before
+    the first rollup)."""
     etag, gzipped, body = await build_system_rankings(limit)
     return json_cache_response(
         body, gzipped, etag, config.cache.rankings_ttl, if_none_match, revalidate=True
@@ -106,7 +119,9 @@ async def build_system_kills(
         )
 
         async def build() -> str:
-            return (await fetch_system_kills(s, e)).model_dump_json()
+            return (await fetch_system_kills(s, e)).model_dump_json(
+                exclude_none=True
+            )
 
     else:
         key = flt.canonical()
@@ -118,7 +133,9 @@ async def build_system_kills(
         )
 
         async def build() -> str:
-            return (await fetch_filtered_map(flt, s, e)).model_dump_json()
+            return (await fetch_filtered_map(flt, s, e)).model_dump_json(
+                exclude_none=True
+            )
 
     return await _get_or_build(prefix, params, lock, ttl, build)
 
@@ -140,7 +157,8 @@ async def get_system_kills_stats(
     optional). Unfiltered requests serve from the pre-computed MVs (cached
     like /stats/system-rankings, same TTL). Filtered requests (``f=`` params)
     compute from ``kill_facets`` and cache under a separate prefix with their
-    own TTL."""
+    own TTL. `computed_at` is the rollup watermark for unfiltered requests and
+    the build time for filtered ones."""
     etag, gzipped, body = await build_system_kills(start, end, flt)
     ttl = config.cache.rankings_ttl if flt.is_empty else config.cache.filtered_map_ttl
     return json_cache_response(body, gzipped, etag, ttl, if_none_match, revalidate=True)

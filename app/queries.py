@@ -1,3 +1,4 @@
+import asyncio
 import time
 from datetime import date, datetime, timezone
 from typing import Any
@@ -33,6 +34,21 @@ _TOP_INTERVALS = {  # response-key -> trailing interval (day-aligned, incl. toda
     "six_months": "6 months",
     "year": "1 year",
 }
+
+ROLLUP_WATERMARK_NAME = "entity_kills_daily"
+
+
+async def fetch_rollup_watermark() -> int | None:
+    """Epoch of process-kills' shared rollup watermark: kills inserted up to this
+    DB time are reflected in system_kills_daily and mv_kills_per_system. The row
+    name is process-kills' internal key for the watermark; it predates the system
+    rollup joining the mechanism and is not a table reference. None until the
+    historical backfill has ever run."""
+    return await db.fetchval(
+        "SELECT FLOOR(EXTRACT(EPOCH FROM watermark))::BIGINT "
+        "FROM rollup_state WHERE name = $1",
+        ROLLUP_WATERMARK_NAME,
+    )
 
 
 async def fetch_kills_by_ids(killmail_ids: list[int]) -> RawKillDetailResponse:
@@ -271,10 +287,11 @@ async def fetch_system_kills(
     start: date | None = None, end: date | None = None
 ) -> SystemKillsResponse:
     if start is None and end is None:
-        rows = await db.fetch(
+        query = (
             "SELECT solar_system_id, kill_count FROM mv_kills_per_system "
             "ORDER BY solar_system_id"
         )
+        args: list = []
     else:
         conds, args = [], []
         if start is not None:
@@ -284,13 +301,16 @@ async def fetch_system_kills(
             args.append(end)
             conds.append(f"day < ${len(args)}")
         where = " AND ".join(conds)
-        rows = await db.fetch(
+        query = (
             "SELECT solar_system_id, SUM(kill_count) AS kill_count "
             f"FROM system_kills_daily WHERE {where} "
-            "GROUP BY solar_system_id ORDER BY solar_system_id",
-            *args,
+            "GROUP BY solar_system_id ORDER BY solar_system_id"
         )
+    rows, computed_at = await asyncio.gather(
+        db.fetch(query, *args), fetch_rollup_watermark()
+    )
     return SystemKillsResponse(
+        computed_at=computed_at,
         system_ids=[r["solar_system_id"] for r in rows],
         kills=[r["kill_count"] for r in rows],
     )

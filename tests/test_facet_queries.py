@@ -28,6 +28,7 @@ def test_fetch_filtered_map_builds_columns(monkeypatch):
     assert result.system_ids == [30000142, 30002187]
     assert result.kills == [10, 4]
     assert "kill_facets" in fake.query
+    assert isinstance(result.computed_at, int) and result.computed_at > 0
 
 
 def test_fetch_filtered_map_threads_window(monkeypatch):
