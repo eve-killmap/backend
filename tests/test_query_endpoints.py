@@ -450,3 +450,39 @@ def test_system_kills_endpoint_rejects_end_le_start():
             )
         )
     assert e.value.status_code == 400
+
+
+def test_get_or_build_does_not_cache_a_failed_build(monkeypatch):
+    import asyncio, pytest
+    from fastapi import HTTPException
+    import app.routers.stats as stats
+
+    sets: list = []
+    builds = {"n": 0}
+
+    async def fake_get(prefix, params):
+        return None
+
+    async def fake_set(prefix, params, value, ttl=None):
+        sets.append((prefix, params, value, ttl))
+        return ('"e"', False, value.encode())
+
+    async def failing_build():
+        builds["n"] += 1
+        raise HTTPException(status_code=503, detail="cold")
+
+    async def ok_build():
+        builds["n"] += 1
+        return "{}"
+
+    monkeypatch.setattr(stats.query_cache, "get", fake_get)
+    monkeypatch.setattr(stats.query_cache, "set", fake_set)
+
+    with pytest.raises(HTTPException):
+        asyncio.run(stats._get_or_build("p", {"a": 1}, "p:1", 30, failing_build))
+    assert sets == []  # the failure was not cached
+
+    res = asyncio.run(stats._get_or_build("p", {"a": 1}, "p:1", 30, ok_build))
+    assert builds["n"] == 2  # lock released after the failure; rebuilt on retry
+    assert sets == [("p", {"a": 1}, "{}", 30)]
+    assert res == ('"e"', False, b"{}")

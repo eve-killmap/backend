@@ -1,6 +1,6 @@
 import json
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Awaitable, Callable
 
 from fastapi import APIRouter, Query, Header, Depends, HTTPException
 
@@ -16,6 +16,25 @@ from app.filters import Filter
 from app.facet_queries import fetch_filtered_map
 
 router = APIRouter()
+
+
+async def _get_or_build(
+    prefix: str,
+    params: dict,
+    lock: str,
+    ttl: int,
+    build: Callable[[], Awaitable[str]],
+) -> tuple[str, bool, bytes]:
+    """Serve ``prefix``/``params`` from query_cache, else run ``build`` once under
+    a per-key single-flight lock and cache its JSON body for ``ttl``. A build
+    that raises caches nothing and releases the lock for the next caller."""
+    res = await query_cache.get(prefix, params)
+    if res is None:
+        async with single_flight.lock(lock):
+            res = await query_cache.get(prefix, params)
+            if res is None:
+                res = await query_cache.set(prefix, params, await build(), ttl=ttl)
+    return res
 
 
 def _parse_day(s: str | None) -> date | None:
@@ -34,22 +53,19 @@ async def build_system_rankings(limit: int) -> tuple[str, bool, bytes]:
     to the exact same cache key, so this must stay the sole owner of the
     ``system_rankings`` prefix + params shape.
     """
-    cache_params = {"limit": limit}
-    res = await query_cache.get("system_rankings", cache_params)
-    if res is None:
-        async with single_flight.lock(f"system_rankings:{limit}"):
-            res = await query_cache.get("system_rankings", cache_params)
-            if res is None:
-                top = await fetch_top_systems(limit=limit)
-                bottom = await fetch_bottom_systems(limit=limit)
-                result = RankSystemsResponse(top=top, bottom=bottom)
-                res = await query_cache.set(
-                    "system_rankings",
-                    cache_params,
-                    result.model_dump_json(),
-                    ttl=config.cache.rankings_ttl,
-                )
-    return res
+
+    async def build() -> str:
+        top = await fetch_top_systems(limit=limit)
+        bottom = await fetch_bottom_systems(limit=limit)
+        return RankSystemsResponse(top=top, bottom=bottom).model_dump_json()
+
+    return await _get_or_build(
+        "system_rankings",
+        {"limit": limit},
+        f"system_rankings:{limit}",
+        config.cache.rankings_ttl,
+        build,
+    )
 
 
 @router.get("/stats/system-rankings", response_model=None)
@@ -89,8 +105,8 @@ async def build_system_kills(
             {"start": start, "end": end},
         )
 
-        async def builder():
-            return await fetch_system_kills(s, e)
+        async def build() -> str:
+            return (await fetch_system_kills(s, e)).model_dump_json()
 
     else:
         key = flt.canonical()
@@ -101,19 +117,10 @@ async def build_system_kills(
             {"filter": key, "start": start, "end": end},
         )
 
-        async def builder():
-            return await fetch_filtered_map(flt, s, e)
+        async def build() -> str:
+            return (await fetch_filtered_map(flt, s, e)).model_dump_json()
 
-    res = await query_cache.get(prefix, params)
-    if res is None:
-        async with single_flight.lock(lock):
-            res = await query_cache.get(prefix, params)
-            if res is None:
-                result = await builder()
-                res = await query_cache.set(
-                    prefix, params, result.model_dump_json(), ttl=ttl
-                )
-    return res
+    return await _get_or_build(prefix, params, lock, ttl, build)
 
 
 @router.get("/stats/system-kills", response_model=None)
@@ -143,27 +150,20 @@ async def build_system_jumps() -> tuple[str, bool, bytes]:
     """Get-or-build-and-cache the global jumps response.
 
     Sole owner of the ``system_jumps`` prefix + params shape."""
-    params: dict = {}
-    res = await query_cache.get("system_jumps", params)
-    if res is None:
-        async with single_flight.lock("system_jumps"):
-            res = await query_cache.get("system_jumps", params)
-            if res is None:
-                jumps = await esi_client.get_cached(SYSTEM_JUMPS)
-                if jumps is None:
-                    raise HTTPException(status_code=503, detail="jump data warming up")
-                ordered = sorted(jumps.items())
-                result = SystemJumpsResponse(
-                    system_ids=[sid for sid, _ in ordered],
-                    jumps=[n for _, n in ordered],
-                )
-                res = await query_cache.set(
-                    "system_jumps",
-                    params,
-                    result.model_dump_json(),
-                    ttl=config.cache.system_jumps_ttl,
-                )
-    return res
+
+    async def build() -> str:
+        jumps = await esi_client.get_cached(SYSTEM_JUMPS)
+        if jumps is None:
+            raise HTTPException(status_code=503, detail="jump data warming up")
+        ordered = sorted(jumps.items())
+        return SystemJumpsResponse(
+            system_ids=[sid for sid, _ in ordered],
+            jumps=[n for _, n in ordered],
+        ).model_dump_json()
+
+    return await _get_or_build(
+        "system_jumps", {}, "system_jumps", config.cache.system_jumps_ttl, build
+    )
 
 
 @router.get("/stats/system-jumps", response_model=None)
@@ -198,8 +198,8 @@ async def build_global_kills(
             {"bins": bins, "map": map},
         )
 
-        async def builder():
-            return await fetch_global_kills(map, bins)
+        async def build() -> str:
+            return json.dumps(await fetch_global_kills(map, bins))
 
     else:
         key = flt.canonical()
@@ -210,17 +210,10 @@ async def build_global_kills(
             {"filter": key, "map": map, "bins": bins},
         )
 
-        async def builder():
-            return await fetch_filtered_global_kills(flt, map, bins)
+        async def build() -> str:
+            return json.dumps(await fetch_filtered_global_kills(flt, map, bins))
 
-    res = await query_cache.get(prefix, params)
-    if res is None:
-        async with single_flight.lock(lock):
-            res = await query_cache.get(prefix, params)
-            if res is None:
-                counts = await builder()
-                res = await query_cache.set(prefix, params, json.dumps(counts), ttl=ttl)
-    return res
+    return await _get_or_build(prefix, params, lock, ttl, build)
 
 
 @router.get("/stats/global-kills", response_model=None)
