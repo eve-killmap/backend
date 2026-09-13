@@ -503,4 +503,8 @@ async def get_type_names(ids: set[int]) -> dict[int, str]:
             for row in rows:
                 result[row["id"]] = row["name"]
 
+    for type_id in ids:
+        pm.entity_lookups.labels(
+            kind="type", result="found" if type_id in result else "missing"
+        ).inc()
     return result

@@ -26,12 +26,13 @@ def test_singletons_accept_calls():
         "kill_details_processed",
         "binary",
         "type_name",
+        "leaderboards",
     ):
         pm.cache_hits.labels(cache=cache).inc()
         pm.cache_misses.labels(cache=cache).inc()
     for op in ("get", "set"):
         pm.redis_command_seconds.labels(op=op).observe(0.001)
-    for target in ("system_rankings", "farthest_kill", "sov"):
+    for target in ("system_rankings", "farthest_kill", "sov", "leaderboards", "system_jumps"):
         pm.cache_invalidations_received.labels(target=target).inc()
         pm.cache_keys_evicted.labels(target=target).inc(3)
     for endpoint in ("names", "corporation", "alliance", "war", "sov"):
@@ -53,7 +54,7 @@ def test_singletons_accept_calls():
     pm.ws_messages_dropped.inc()
     pm.since_short_circuits.inc()
     pm.kills_binary_response_bytes.observe(2048)
-    for kind in ("character", "corporation", "alliance", "faction"):
+    for kind in ("character", "corporation", "alliance", "faction", "type"):
         for result in ("found", "missing"):
             pm.entity_lookups.labels(kind=kind, result=result).inc()
     for result in ("resolved", "stub", "absent"):

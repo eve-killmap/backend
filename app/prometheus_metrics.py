@@ -34,7 +34,7 @@ _BYTE_BUCKETS = (0, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576)
 errors = Counter(
     "eve_killmap_errors",
     "Unhandled errors swallowed in a handler/loop, by component.",
-    ["component"],  # esi|broadcaster|invalidation|cache
+    ["component"],  # esi|broadcaster|invalidation|cache|cache_warm
 )
 service_start_timestamp = Gauge(
     "eve_killmap_service_start_timestamp_seconds",
@@ -53,14 +53,14 @@ cache_hits = Counter(
     "Response-cache hits, by cache.",
     [
         "cache"
-    ],  # system_rankings|system_kills|system_kills_filtered|global_kills|farthest_kill|sov|sov_map|kill_details|kill_details_processed|binary|type_name
+    ],  # system_rankings|system_kills|system_kills_filtered|global_kills|global_kills_filtered|leaderboards|farthest_kill|sov|sov_map|system_jumps|kill_details|kill_details_processed|binary|type_name
 )
 cache_misses = Counter(
     "eve_killmap_cache_misses",
     "Response-cache misses, by cache.",
     [
         "cache"
-    ],  # system_rankings|system_kills|system_kills_filtered|global_kills|farthest_kill|sov|sov_map|kill_details|kill_details_processed|binary|type_name
+    ],  # system_rankings|system_kills|system_kills_filtered|global_kills|global_kills_filtered|leaderboards|farthest_kill|sov|sov_map|system_jumps|kill_details|kill_details_processed|binary|type_name
 )
 redis_command_seconds = Histogram(
     "eve_killmap_redis_command_seconds",
@@ -74,12 +74,12 @@ redis_command_seconds = Histogram(
 cache_invalidations_received = Counter(
     "eve_killmap_cache_invalidations_received",
     "Cache-invalidation messages received, by target.",
-    ["target"],  # system_rankings|system_kills|global_kills|farthest_kill|sov|sov_map
+    ["target"],  # system_rankings|system_kills|global_kills|farthest_kill|leaderboards|sov|sov_map|system_jumps
 )
 cache_keys_evicted = Counter(
     "eve_killmap_cache_keys_evicted",
     "Cache keys evicted by invalidation, by target.",
-    ["target"],  # system_rankings|system_kills|global_kills|farthest_kill|sov|sov_map
+    ["target"],  # system_rankings|system_kills|global_kills|farthest_kill|leaderboards|sov|sov_map|system_jumps
 )
 
 cache_warm_runs_total = Counter(
@@ -105,7 +105,7 @@ esi_requests = Counter(
     [
         "endpoint",
         "outcome",
-    ],  # endpoint: names|corporation|alliance|war|sov|sov_structures  outcome: ok|not_found|rate_limited|error
+    ],  # endpoint: corporation|alliance|sov|sov_structures|system_jumps|status  outcome: ok|error
 )
 esi_request_seconds = Histogram(
     "eve_killmap_esi_request_seconds",
@@ -115,7 +115,7 @@ esi_request_seconds = Histogram(
 esi_cache_hits = Counter(
     "eve_killmap_esi_cache_hits",
     "ESI Redis-cache hits, by entity.",
-    ["entity"],  # character|corporation|alliance|war|sov|sov_structures
+    ["entity"],  # corporation|alliance|sov|sov_structures|system_jumps|status
 )
 esi_cache_misses = Counter(
     "eve_killmap_esi_cache_misses",
@@ -130,7 +130,7 @@ entity_lookups = Counter(
     [
         "kind",
         "result",
-    ],  # kind: character|corporation|alliance|faction  result: found|missing
+    ],  # kind: character|corporation|alliance|faction|type  result: found|missing
 )
 war_lookups = Counter(
     "eve_killmap_war_lookups",

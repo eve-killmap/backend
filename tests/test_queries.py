@@ -32,9 +32,23 @@ def test_get_type_names_hit_metric(monkeypatch):
     # All ids resolved from Redis -> one type_name hit, no DB.
     monkeypatch.setattr(queries, "_redis", _FakeMget(["Rifter"]))
     h0 = _sample("eve_killmap_cache_hits_total", {"cache": "type_name"})
+    f0 = _sample("eve_killmap_entity_lookups_total", {"kind": "type", "result": "found"})
     result = asyncio.run(queries.get_type_names({587}))
     assert result == {587: "Rifter"}
     assert _sample("eve_killmap_cache_hits_total", {"cache": "type_name"}) - h0 == 1
+    assert _sample("eve_killmap_entity_lookups_total", {"kind": "type", "result": "found"}) - f0 == 1
+
+
+def test_get_type_names_counts_missing_ids(monkeypatch):
+    # No Redis, DB knows 587 but not 999999: one found, one missing.
+    monkeypatch.setattr(queries, "_redis", None)
+    monkeypatch.setattr(queries, "db", _FakeDbFetch([{"id": 587, "name": "Rifter"}]))
+    f0 = _sample("eve_killmap_entity_lookups_total", {"kind": "type", "result": "found"})
+    m0 = _sample("eve_killmap_entity_lookups_total", {"kind": "type", "result": "missing"})
+    result = asyncio.run(queries.get_type_names({587, 999999}))
+    assert result == {587: "Rifter"}
+    assert _sample("eve_killmap_entity_lookups_total", {"kind": "type", "result": "found"}) - f0 == 1
+    assert _sample("eve_killmap_entity_lookups_total", {"kind": "type", "result": "missing"}) - m0 == 1
 
 
 def test_get_kill_details_cached_hit_metric(monkeypatch):
