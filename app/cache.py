@@ -22,7 +22,7 @@ def _hash_params(params: dict) -> str:
     ).hexdigest()[:16]
 
 
-QUERY_KEY_VERSION = "v2"
+QUERY_KEY_VERSION = "v3"
 BINARY_KEY_VERSION = "v2"
 
 

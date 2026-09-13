@@ -8,21 +8,19 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 import redis.asyncio as aioredis
 
 from app import prometheus_metrics as pm
+from app.cache import QUERY_KEY_VERSION
 
 if TYPE_CHECKING:
     from app.redis_client import KillBroadcaster
 
 logger = logging.getLogger(__name__)
 
+_TARGET_PREFIXES = (
+    "system_rankings", "system_kills", "global_kills", "farthest_kill",
+    "leaderboards", "sov", "sov_map", "system_jumps",
+)
 INVALIDATION_PATTERNS = {
-    "system_rankings": "query:v2:system_rankings:*",
-    "system_kills": "query:v2:system_kills:*",
-    "global_kills": "query:v2:global_kills:*",
-    "farthest_kill": "query:v2:farthest_kill:*",
-    "leaderboards": "query:v2:leaderboards:*",
-    "sov": "query:v2:sov:*",
-    "sov_map": "query:v2:sov_map:*",
-    "system_jumps": "query:v2:system_jumps:*",
+    t: f"query:{QUERY_KEY_VERSION}:{t}:*" for t in _TARGET_PREFIXES
 }
 
 # Targets whose response cache is repopulated ("warmed") right after a flush,

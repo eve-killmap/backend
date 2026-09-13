@@ -10,17 +10,17 @@ from app.invalidation import patterns_for_targets
 def test_new_patterns_present():
     from app.invalidation import INVALIDATION_PATTERNS
 
-    assert INVALIDATION_PATTERNS["system_kills"] == "query:v2:system_kills:*"
-    assert INVALIDATION_PATTERNS["global_kills"] == "query:v2:global_kills:*"
-    assert INVALIDATION_PATTERNS["leaderboards"] == "query:v2:leaderboards:*"
+    assert INVALIDATION_PATTERNS["system_kills"] == "query:v3:system_kills:*"
+    assert INVALIDATION_PATTERNS["global_kills"] == "query:v3:global_kills:*"
+    assert INVALIDATION_PATTERNS["leaderboards"] == "query:v3:leaderboards:*"
 
 
 def test_system_kills_pattern_excludes_filtered():
-    # 'query:v2:system_kills:*' must not match 'query:v2:system_kills_filtered:...'
+    # 'query:v3:system_kills:*' must not match 'query:v3:system_kills_filtered:...'
     assert not fnmatch.fnmatch(
-        "query:v2:system_kills_filtered:abc", "query:v2:system_kills:*"
+        "query:v3:system_kills_filtered:abc", "query:v3:system_kills:*"
     )
-    assert fnmatch.fnmatch("query:v2:system_kills:xyz", "query:v2:system_kills:*")
+    assert fnmatch.fnmatch("query:v3:system_kills:xyz", "query:v3:system_kills:*")
 
 
 def test_warmable_targets_set():
@@ -33,9 +33,9 @@ def test_warmable_targets_set():
 
 
 def test_patterns_for_known_targets():
-    assert patterns_for_targets(["system_rankings"]) == ["query:v2:system_rankings:*"]
+    assert patterns_for_targets(["system_rankings"]) == ["query:v3:system_rankings:*"]
     out = patterns_for_targets(["sov", "farthest_kill"])
-    assert set(out) == {"query:v2:sov:*", "query:v2:farthest_kill:*"}
+    assert set(out) == {"query:v3:sov:*", "query:v3:farthest_kill:*"}
 
 
 def test_patterns_ignores_unknown():
@@ -43,19 +43,19 @@ def test_patterns_ignores_unknown():
 
 
 def test_sov_and_sov_map_patterns_do_not_collide():
-    # The §2.6 footgun: "query:v2:sov:*" must NOT match a "query:v2:sov_map:<hash>"
+    # The §2.6 footgun: "query:v3:sov:*" must NOT match a "query:v3:sov_map:<hash>"
     # key, and vice versa. Assert it via the same prefix logic the subscriber uses.
     out = patterns_for_targets(["sov", "sov_map"])
-    assert set(out) == {"query:v2:sov:*", "query:v2:sov_map:*"}
+    assert set(out) == {"query:v3:sov:*", "query:v3:sov_map:*"}
 
     def matches(pattern, key):
         prefix = pattern[:-1] if pattern.endswith("*") else pattern
         return key.startswith(prefix)
 
-    assert not matches("query:v2:sov:*", "query:v2:sov_map:abc123")
-    assert not matches("query:v2:sov_map:*", "query:v2:sov:abc123")
-    assert matches("query:v2:sov_map:*", "query:v2:sov_map:abc123")
-    assert matches("query:v2:sov:*", "query:v2:sov:abc123")
+    assert not matches("query:v3:sov:*", "query:v3:sov_map:abc123")
+    assert not matches("query:v3:sov_map:*", "query:v3:sov:abc123")
+    assert matches("query:v3:sov_map:*", "query:v3:sov_map:abc123")
+    assert matches("query:v3:sov:*", "query:v3:sov:abc123")
 
 
 class _FakePubSub:
@@ -113,7 +113,7 @@ def test_subscriber_subscribes_on_bus_and_deletes_on_cache():
     pubsub = _FakePubSub([{"type": "subscribe"}, msg])
     bus = _FakeBus(pubsub)
     cache = _FakeCache(
-        ["query:v2:sov:abc", "query:v2:sov:def", "query:v2:system_rankings:x"]
+        ["query:v3:sov:abc", "query:v3:sov:def", "query:v3:system_rankings:x"]
     )
 
     asyncio.run(
@@ -123,7 +123,7 @@ def test_subscriber_subscribes_on_bus_and_deletes_on_cache():
     # Subscription happened on the bus connection...
     assert pubsub.subscribed == "cache:invalidate"
     # ...and only the matching sov keys were deleted, on the CACHE connection.
-    assert set(cache.deleted) == {"query:v2:sov:abc", "query:v2:sov:def"}
+    assert set(cache.deleted) == {"query:v3:sov:abc", "query:v3:sov:def"}
     # ...and the subscriber cleaned up on exit.
     assert pubsub.unsubscribed == "cache:invalidate"
     assert pubsub.closed is True
@@ -132,7 +132,7 @@ def test_subscriber_subscribes_on_bus_and_deletes_on_cache():
 def test_subscriber_ignores_unknown_targets():
     msg = {"type": "message", "data": json.dumps({"targets": ["bogus"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:sov:abc"])
+    cache = _FakeCache(["query:v3:sov:abc"])
 
     asyncio.run(
         invalidation.subscriber_loop(
@@ -147,7 +147,7 @@ def test_subscriber_skips_malformed_message():
     # A non-JSON payload must be logged + skipped, never raised, and never delete.
     bad = {"type": "message", "data": "not json{"}
     pubsub = _FakePubSub([bad])
-    cache = _FakeCache(["query:v2:sov:abc"])
+    cache = _FakeCache(["query:v3:sov:abc"])
 
     asyncio.run(
         invalidation.subscriber_loop(
@@ -170,7 +170,7 @@ def _sample(name, labels=None):
 def test_subscriber_records_received_and_evicted_metrics():
     msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:sov:a", "query:v2:sov:b"])
+    cache = _FakeCache(["query:v3:sov:a", "query:v3:sov:b"])
 
     r0 = _sample("eve_killmap_cache_invalidations_received_total", {"target": "sov"})
     e0 = _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"})
@@ -202,7 +202,7 @@ def test_non_leader_skips_warmable_target(monkeypatch):
     monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
     msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:system_kills:abc"])
+    cache = _FakeCache(["query:v3:system_kills:abc"])
 
     asyncio.run(
         invalidation.subscriber_loop(
@@ -217,7 +217,7 @@ def test_leader_flushes_warmable_target(monkeypatch):
     monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
     msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:system_kills:abc"])
+    cache = _FakeCache(["query:v3:system_kills:abc"])
 
     asyncio.run(
         invalidation.subscriber_loop(
@@ -225,7 +225,7 @@ def test_leader_flushes_warmable_target(monkeypatch):
         )
     )
 
-    assert cache.deleted == ["query:v2:system_kills:abc"]
+    assert cache.deleted == ["query:v3:system_kills:abc"]
 
 
 def test_non_warmable_target_flushed_regardless_of_leadership(monkeypatch):
@@ -234,7 +234,7 @@ def test_non_warmable_target_flushed_regardless_of_leadership(monkeypatch):
     monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
     msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:sov:abc"])
+    cache = _FakeCache(["query:v3:sov:abc"])
 
     asyncio.run(
         invalidation.subscriber_loop(
@@ -242,16 +242,16 @@ def test_non_warmable_target_flushed_regardless_of_leadership(monkeypatch):
         )
     )
 
-    assert cache.deleted == ["query:v2:sov:abc"]
+    assert cache.deleted == ["query:v3:sov:abc"]
 
 
 def test_warmable_target_pattern_does_not_match_filtered_key(monkeypatch):
-    # query:v2:system_kills:* must not evict query:v2:system_kills_filtered:* keys.
+    # query:v3:system_kills:* must not evict query:v3:system_kills_filtered:* keys.
     monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
     msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
     pubsub = _FakePubSub([msg])
     cache = _FakeCache(
-        ["query:v2:system_kills:abc", "query:v2:system_kills_filtered:def"]
+        ["query:v3:system_kills:abc", "query:v3:system_kills_filtered:def"]
     )
 
     asyncio.run(
@@ -260,7 +260,7 @@ def test_warmable_target_pattern_does_not_match_filtered_key(monkeypatch):
         )
     )
 
-    assert cache.deleted == ["query:v2:system_kills:abc"]
+    assert cache.deleted == ["query:v3:system_kills:abc"]
 
 
 def test_leader_warms_once_per_message_after_warmable_flush(monkeypatch):
@@ -272,7 +272,7 @@ def test_leader_warms_once_per_message_after_warmable_flush(monkeypatch):
         "data": json.dumps({"targets": ["system_kills", "system_rankings"]}),
     }
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:system_kills:abc", "query:v2:system_rankings:def"])
+    cache = _FakeCache(["query:v3:system_kills:abc", "query:v3:system_rankings:def"])
     warm_calls = []
 
     async def fake_warm():
@@ -291,7 +291,7 @@ def test_non_leader_never_calls_warm(monkeypatch):
     monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
     msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:system_kills:abc"])
+    cache = _FakeCache(["query:v3:system_kills:abc"])
     warm_calls = []
 
     async def fake_warm():
@@ -311,7 +311,7 @@ def test_non_warmable_target_does_not_trigger_warm(monkeypatch):
     monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
     msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:sov:abc"])
+    cache = _FakeCache(["query:v3:sov:abc"])
     warm_calls = []
 
     async def fake_warm():
@@ -333,7 +333,7 @@ def test_warm_callback_failure_does_not_crash_subscriber(monkeypatch):
     monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
     msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:system_kills:abc"])
+    cache = _FakeCache(["query:v3:system_kills:abc"])
 
     async def broken_warm():
         raise RuntimeError("boom")
@@ -348,7 +348,7 @@ def test_warm_callback_failure_does_not_crash_subscriber(monkeypatch):
         )
     )
 
-    assert cache.deleted == ["query:v2:system_kills:abc"]
+    assert cache.deleted == ["query:v3:system_kills:abc"]
     assert pubsub.closed is True
 
 
@@ -358,7 +358,7 @@ def test_warm_default_none_is_never_called(monkeypatch):
     monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
     msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:system_kills:abc"])
+    cache = _FakeCache(["query:v3:system_kills:abc"])
 
     asyncio.run(
         invalidation.subscriber_loop(
@@ -366,14 +366,14 @@ def test_warm_default_none_is_never_called(monkeypatch):
         )
     )
 
-    assert cache.deleted == ["query:v2:system_kills:abc"]
+    assert cache.deleted == ["query:v3:system_kills:abc"]
 
 
 def test_leader_flushes_leaderboards_and_warms(monkeypatch):
     monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
     msg = {"type": "message", "data": json.dumps({"targets": ["leaderboards"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:leaderboards:abc", "query:v2:system_rankings:x"])
+    cache = _FakeCache(["query:v3:leaderboards:abc", "query:v3:system_rankings:x"])
     warm_calls = []
 
     async def fake_warm():
@@ -384,7 +384,7 @@ def test_leader_flushes_leaderboards_and_warms(monkeypatch):
             _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=fake_warm
         )
     )
-    assert cache.deleted == ["query:v2:leaderboards:abc"]
+    assert cache.deleted == ["query:v3:leaderboards:abc"]
     assert warm_calls == [1]
 
 
@@ -392,7 +392,7 @@ def test_non_leader_skips_leaderboards(monkeypatch):
     monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
     msg = {"type": "message", "data": json.dumps({"targets": ["leaderboards"]})}
     pubsub = _FakePubSub([msg])
-    cache = _FakeCache(["query:v2:leaderboards:abc"])
+    cache = _FakeCache(["query:v3:leaderboards:abc"])
 
     asyncio.run(
         invalidation.subscriber_loop(
@@ -400,3 +400,14 @@ def test_non_leader_skips_leaderboards(monkeypatch):
         )
     )
     assert cache.deleted == []
+
+
+def test_invalidation_patterns_follow_the_query_key_version():
+    from app.cache import QUERY_KEY_VERSION
+
+    for target, pattern in invalidation.INVALIDATION_PATTERNS.items():
+        assert pattern == f"query:{QUERY_KEY_VERSION}:{target}:*"
+    assert set(invalidation.INVALIDATION_PATTERNS) == {
+        "system_rankings", "system_kills", "global_kills", "farthest_kill",
+        "leaderboards", "sov", "sov_map", "system_jumps",
+    }
