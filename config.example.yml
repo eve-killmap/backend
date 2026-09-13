@@ -116,7 +116,7 @@ limits:
   encode_offload_min_rows: 2000      # offload the binary kills encode to a thread at/above this row count
   system_rankings_default_limit: 10
   # Entries per board when /stats/leaderboards omits limit (1-50). The leader's
-  # cache warm builds every window/role at this value, so match what the
+  # cache warm builds every window/role/scope at this value, so match what the
   # frontend requests.
   leaderboards_default_limit: 10
   global_kills_default_bins: 300

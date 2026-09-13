@@ -4,7 +4,7 @@ import app.cache_warm as cw
 
 
 def test_warm_all_builds_the_warm_set(monkeypatch):
-    from app.leaderboards import ROLES, WINDOWS
+    from app.leaderboards import ROLES, SCOPES, WINDOWS
 
     calls = {"sk": 0, "rank": 0, "gk": [], "lb": []}
 
@@ -21,8 +21,8 @@ def test_warm_all_builds_the_warm_set(monkeypatch):
         assert flt is None
         return ("e", False, b"[]")
 
-    async def fake_lb(window, role, limit):
-        calls["lb"].append((window, role, limit))
+    async def fake_lb(window, role, scope, limit):
+        calls["lb"].append((window, role, scope, limit))
         return ("e", False, b"{}")
 
     monkeypatch.setattr(cw, "build_system_kills", fake_sk)
@@ -38,11 +38,12 @@ def test_warm_all_builds_the_warm_set(monkeypatch):
         "tutorials",
     ]
     expected = sorted(
-        (w, r, cw.config.limits.leaderboards_default_limit)
+        (w, r, s, cw.config.limits.leaderboards_default_limit)
         for w in WINDOWS
         for r in ROLES
+        for s in SCOPES
     )
-    assert sorted(calls["lb"]) == expected and len(expected) == 12
+    assert sorted(calls["lb"]) == expected and len(expected) == 24
 
 
 def test_warm_all_respects_toggle(monkeypatch):

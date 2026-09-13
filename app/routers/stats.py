@@ -9,7 +9,7 @@ from app.cache import query_cache, single_flight
 from app.esi import SYSTEM_JUMPS, esi_client
 from app.global_kills import fetch_global_kills, fetch_filtered_global_kills, MAP_RANGES
 from app.http_cache import json_cache_response
-from app.leaderboards import Role, Window, fetch_leaderboards
+from app.leaderboards import Role, Window, Scope, fetch_leaderboards
 from app.models import RankSystemsResponse, SystemJumpsResponse
 from app.queries import fetch_top_systems, fetch_system_kills, fetch_rollup_watermark
 from app.routers.dependencies import get_filter
@@ -253,9 +253,10 @@ async def get_global_kills(
 
 
 async def build_leaderboards(
-    window: str, role: str, limit: int
+    window: str, role: str, scope: str, limit: int
 ) -> tuple[str, bool, bytes]:
-    """Get-or-build-and-cache the leaderboards response for ``window``/``role``/``limit``.
+    """Get-or-build-and-cache the leaderboards response for
+    ``window``/``role``/``scope``/``limit``.
 
     Shared by the endpoint and the leader's cache-warm cycle; both must resolve
     to the exact same cache key, so this must stay the sole owner of the
@@ -263,14 +264,14 @@ async def build_leaderboards(
     """
 
     async def build() -> str:
-        return (await fetch_leaderboards(window, role, limit)).model_dump_json(
+        return (await fetch_leaderboards(window, role, scope, limit)).model_dump_json(
             exclude_none=True
         )
 
     return await _get_or_build(
         "leaderboards",
-        {"window": window, "role": role, "limit": limit},
-        f"leaderboards:{window}:{role}:{limit}",
+        {"window": window, "role": role, "scope": scope, "limit": limit},
+        f"leaderboards:{window}:{role}:{scope}:{limit}",
         config.cache.rankings_ttl,
         build,
     )
@@ -282,18 +283,22 @@ async def get_leaderboards(
     role: Annotated[
         Role, Query(description="victim (kills lost) or attacker (kills made)")
     ],
+    scope: Annotated[
+        Scope, Query(description="all, or players (NPC entities removed)")
+    ],
     limit: Annotated[
         int, Query(ge=1, le=50, description="Entries per board")
     ] = config.limits.leaderboards_default_limit,
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ):
-    """Top entities by kill count for one window and role: one board per facet
-    kind (character, corporation, alliance, faction, ship, weapon), each in rank
-    order and possibly shorter than ``limit`` or empty. ``name``/``ticker`` are
-    omitted when unknown; ``computed_at`` is when process-kills wrote the
-    window's boards. Cached like /stats/system-rankings until a ``leaderboards``
-    invalidation."""
-    etag, gzipped, body = await build_leaderboards(window, role, limit)
+    """Top entities by kill count for one window, role and scope: one board per
+    facet kind (character, corporation, alliance, faction, ship, weapon), each in
+    rank order and possibly shorter than ``limit`` or empty. ``scope=players``
+    drops NPC entities (as classified by process-kills) and re-ranks the rest
+    contiguously; ``all`` keeps everything. ``name``/``ticker`` are omitted when
+    unknown; ``computed_at`` is when process-kills wrote the window's boards.
+    Cached like /stats/system-rankings until a ``leaderboards`` invalidation."""
+    etag, gzipped, body = await build_leaderboards(window, role, scope, limit)
     return json_cache_response(
         body, gzipped, etag, config.cache.rankings_ttl, if_none_match, revalidate=True
     )

@@ -3,7 +3,7 @@ import time
 
 from app.config import config
 from app.global_kills import MAP_RANGES
-from app.leaderboards import ROLES, WINDOWS
+from app.leaderboards import ROLES, SCOPES, WINDOWS
 from app.routers.stats import (
     build_system_kills,
     build_system_rankings,
@@ -35,7 +35,8 @@ async def warm_all() -> None:
         limit = config.limits.leaderboards_default_limit
         for window in WINDOWS:
             for role in ROLES:
-                await build_leaderboards(window, role, limit)
+                for scope in SCOPES:
+                    await build_leaderboards(window, role, scope, limit)
         pm.cache_warm_seconds.observe(time.monotonic() - start)
         pm.cache_warm_runs_total.labels(outcome="success").inc()
         pm.cache_warm_last_success_timestamp_seconds.set_to_current_time()

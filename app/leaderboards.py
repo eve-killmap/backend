@@ -10,6 +10,7 @@ from app.timeparse import datetime_to_epoch
 
 Window = Literal["all", "1d", "7d", "30d", "6m", "1y"]
 Role = Literal["victim", "attacker"]
+Scope = Literal["all", "players"]
 
 WINDOWS: dict[str, str] = {  # public value -> entity_leaderboard.window_key
     "all": "all",
@@ -20,6 +21,7 @@ WINDOWS: dict[str, str] = {  # public value -> entity_leaderboard.window_key
     "1y": "year",
 }
 ROLES: tuple[str, ...] = ("victim", "attacker")
+SCOPES: tuple[str, ...] = ("all", "players")
 KINDS: tuple[str, ...] = (
     "character",
     "corporation",
@@ -35,18 +37,21 @@ _BOARD_SQL = (
     "SELECT facet_kind, facet_value, kill_count, computed_at "
     "FROM entity_leaderboard "
     "WHERE facet_kind = ANY($1::smallint[]) AND role = $2 AND window_key = $3 "
-    "AND rank <= $4 "
+    "AND scope = $4 AND rank <= $5 "
     "ORDER BY facet_kind, rank"
 )
 
 
-async def fetch_leaderboards(window: str, role: str, limit: int) -> LeaderboardsResponse:
-    """Top-``limit`` boards for every facet kind in one ``window``/``role``, with
-    names from the reference tables. Ranks are contiguous per board, so
-    ``rank <= limit`` bounds each board in one query; short or empty boards are
-    returned as they are. ``name``/``ticker`` stay unset when unresolved."""
+async def fetch_leaderboards(
+    window: str, role: str, scope: str, limit: int
+) -> LeaderboardsResponse:
+    """Top-``limit`` boards for every facet kind in one ``window``/``role``/``scope``,
+    with names from the reference tables. ``scope`` is ``all`` or ``players`` (NPC
+    entities removed upstream, ranks recomputed contiguously). Ranks are contiguous
+    per board, so ``rank <= limit`` bounds each board in one query; short or empty
+    boards are returned as they are. ``name``/``ticker`` stay unset when unresolved."""
     rows = await db.fetch(
-        _BOARD_SQL, _KIND_IDS, SIDE_ROLES[role], WINDOWS[window], limit
+        _BOARD_SQL, _KIND_IDS, SIDE_ROLES[role], WINDOWS[window], scope, limit
     )
     by_kind: dict[str, list] = {k: [] for k in KINDS}
     for r in rows:
