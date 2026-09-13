@@ -3,10 +3,12 @@ import time
 
 from app.config import config
 from app.global_kills import MAP_RANGES
+from app.leaderboards import ROLES, WINDOWS
 from app.routers.stats import (
     build_system_kills,
     build_system_rankings,
     build_global_kills,
+    build_leaderboards,
 )
 from app import prometheus_metrics as pm
 
@@ -14,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 async def warm_all() -> None:
-    """Recompute + cache the fixed-parameter MV-derived warm set.
+    """Recompute + cache the fixed-parameter rollup-derived warm set.
 
     Leader-only caller (startup, and the invalidation subscriber loop after a
     warmable target's flush). No-ops when ``config.cache.warm_on_signal`` is
@@ -30,6 +32,10 @@ async def warm_all() -> None:
         bins = config.limits.global_kills_default_bins
         for map_type in MAP_RANGES:
             await build_global_kills(map_type, bins, None)
+        limit = config.limits.leaderboards_default_limit
+        for window in WINDOWS:
+            for role in ROLES:
+                await build_leaderboards(window, role, limit)
         pm.cache_warm_seconds.observe(time.monotonic() - start)
         pm.cache_warm_runs_total.labels(outcome="success").inc()
         pm.cache_warm_last_success_timestamp_seconds.set_to_current_time()

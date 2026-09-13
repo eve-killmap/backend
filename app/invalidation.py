@@ -19,6 +19,7 @@ INVALIDATION_PATTERNS = {
     "system_kills": "query:v2:system_kills:*",
     "global_kills": "query:v2:global_kills:*",
     "farthest_kill": "query:v2:farthest_kill:*",
+    "leaderboards": "query:v2:leaderboards:*",
     "sov": "query:v2:sov:*",
     "sov_map": "query:v2:sov_map:*",
     "system_jumps": "query:v2:system_jumps:*",
@@ -29,7 +30,7 @@ INVALIDATION_PATTERNS = {
 # flushes+warms these — every other worker keeps serving the shared cache
 # until the leader's warm completes, avoiding duplicate warm work and a
 # flush/warm race between workers.
-WARMABLE_TARGETS = {"system_rankings", "system_kills", "global_kills"}
+WARMABLE_TARGETS = {"system_rankings", "system_kills", "global_kills", "leaderboards"}
 
 
 def patterns_for_targets(targets: list[str]) -> list[str]:

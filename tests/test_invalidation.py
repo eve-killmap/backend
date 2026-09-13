@@ -12,6 +12,7 @@ def test_new_patterns_present():
 
     assert INVALIDATION_PATTERNS["system_kills"] == "query:v2:system_kills:*"
     assert INVALIDATION_PATTERNS["global_kills"] == "query:v2:global_kills:*"
+    assert INVALIDATION_PATTERNS["leaderboards"] == "query:v2:leaderboards:*"
 
 
 def test_system_kills_pattern_excludes_filtered():
@@ -27,6 +28,7 @@ def test_warmable_targets_set():
         "system_rankings",
         "system_kills",
         "global_kills",
+        "leaderboards",
     }
 
 
@@ -365,3 +367,36 @@ def test_warm_default_none_is_never_called(monkeypatch):
     )
 
     assert cache.deleted == ["query:v2:system_kills:abc"]
+
+
+def test_leader_flushes_leaderboards_and_warms(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["leaderboards"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v2:leaderboards:abc", "query:v2:system_rankings:x"])
+    warm_calls = []
+
+    async def fake_warm():
+        warm_calls.append(1)
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=fake_warm
+        )
+    )
+    assert cache.deleted == ["query:v2:leaderboards:abc"]
+    assert warm_calls == [1]
+
+
+def test_non_leader_skips_leaderboards(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
+    msg = {"type": "message", "data": json.dumps({"targets": ["leaderboards"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v2:leaderboards:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+    assert cache.deleted == []
