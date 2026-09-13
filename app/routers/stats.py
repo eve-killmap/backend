@@ -11,12 +11,7 @@ from app.global_kills import fetch_global_kills, fetch_filtered_global_kills, MA
 from app.http_cache import json_cache_response
 from app.leaderboards import Role, Window, fetch_leaderboards
 from app.models import RankSystemsResponse, SystemJumpsResponse
-from app.queries import (
-    fetch_top_systems,
-    fetch_bottom_systems,
-    fetch_system_kills,
-    fetch_rollup_watermark,
-)
+from app.queries import fetch_top_systems, fetch_system_kills, fetch_rollup_watermark
 from app.routers.dependencies import get_filter
 from app.filters import Filter
 from app.facet_queries import fetch_filtered_map
@@ -61,14 +56,12 @@ async def build_system_rankings(limit: int) -> tuple[str, bool, bytes]:
     """
 
     async def build() -> str:
-        top, bottom, computed_at = await asyncio.gather(
-            fetch_top_systems(limit=limit),
-            fetch_bottom_systems(limit=limit),
-            fetch_rollup_watermark(),
+        top, computed_at = await asyncio.gather(
+            fetch_top_systems(limit=limit), fetch_rollup_watermark()
         )
-        return RankSystemsResponse(
-            computed_at=computed_at, top=top, bottom=bottom
-        ).model_dump_json(exclude_none=True)
+        return RankSystemsResponse(computed_at=computed_at, top=top).model_dump_json(
+            exclude_none=True
+        )
 
     return await _get_or_build(
         "system_rankings",
@@ -86,7 +79,7 @@ async def get_system_rankings(
     ] = config.limits.system_rankings_default_limit,
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ):
-    """Get rank list of solar systems by highest/lowest number of kills.
+    """Get rank list of solar systems by highest number of kills.
     `computed_at` is the epoch of process-kills' rollup watermark (omitted before
     the first rollup)."""
     etag, gzipped, body = await build_system_rankings(limit)

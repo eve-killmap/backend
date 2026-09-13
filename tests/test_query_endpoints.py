@@ -167,7 +167,7 @@ def test_rankings_serves_gzipped_when_large(monkeypatch):
     import gzip
 
     async def fake_get(prefix, params):
-        raw = b'{"top":[],"bottom":[]}'
+        raw = b'{"top":[]}'
         return '"rank"', True, gzip.compress(raw, 6)
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
@@ -415,7 +415,6 @@ def test_rankings_order_by_has_stable_tiebreaker(monkeypatch):
 
     monkeypatch.setattr(q, "db", _FakeDb())
     asyncio.run(q.fetch_top_systems(limit=10))
-    asyncio.run(q.fetch_bottom_systems(limit=10))
 
     order_bys = [s for s in seen if "ORDER BY" in s]
     assert order_bys  # sanity: the ranking queries do order
@@ -511,22 +510,19 @@ def test_rankings_body_carries_watermark_computed_at(monkeypatch):
     async def fake_top(limit):
         return empty_top
 
-    async def fake_bottom(limit):
-        return []
-
     async def fake_watermark():
         return 1757700000
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
     monkeypatch.setattr(stats.query_cache, "set", fake_set)
     monkeypatch.setattr(stats, "fetch_top_systems", fake_top)
-    monkeypatch.setattr(stats, "fetch_bottom_systems", fake_bottom)
     monkeypatch.setattr(stats, "fetch_rollup_watermark", fake_watermark)
 
     resp = asyncio.run(stats.get_system_rankings(limit=10, if_none_match=None))
     body = _json.loads(resp.body)
     assert body["computed_at"] == 1757700000
-    assert body["bottom"] == [] and body["top"]["day"] == []
+    assert body["top"]["day"] == []
+    assert "bottom" not in body
 
 
 def test_rankings_body_omits_computed_at_without_watermark(monkeypatch):
@@ -542,16 +538,12 @@ def test_rankings_body_omits_computed_at_without_watermark(monkeypatch):
     async def fake_top(limit):
         return TopSystems(all=[], day=[], week=[], month=[], six_months=[], year=[])
 
-    async def fake_bottom(limit):
-        return []
-
     async def fake_watermark():
         return None
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
     monkeypatch.setattr(stats.query_cache, "set", fake_set)
     monkeypatch.setattr(stats, "fetch_top_systems", fake_top)
-    monkeypatch.setattr(stats, "fetch_bottom_systems", fake_bottom)
     monkeypatch.setattr(stats, "fetch_rollup_watermark", fake_watermark)
 
     resp = asyncio.run(stats.get_system_rankings(limit=10, if_none_match=None))

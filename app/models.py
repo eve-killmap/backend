@@ -139,7 +139,6 @@ class TopSystems(BaseModel):
 class RankSystemsResponse(BaseModel):
     computed_at: int | None = None
     top: TopSystems
-    bottom: list[RankSystem]
 
 
 class SystemKillsResponse(BaseModel):

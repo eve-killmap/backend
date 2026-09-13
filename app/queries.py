@@ -265,24 +265,6 @@ async def fetch_top_systems(limit: int = 10) -> TopSystems:
     )
 
 
-async def fetch_bottom_systems(limit: int = 10) -> list[RankSystem]:
-    query = """
-        SELECT
-            solar_system_id,
-            kill_count
-        FROM mv_kills_per_system
-        WHERE solar_system_id < 32000001
-        ORDER BY kill_count ASC, solar_system_id
-        LIMIT $1
-    """
-    rows = await db.fetch(query, limit)
-
-    return [
-        RankSystem(solar_system_id=row["solar_system_id"], kill_count=row["kill_count"])
-        for row in rows
-    ]
-
-
 async def fetch_system_kills(
     start: date | None = None, end: date | None = None
 ) -> SystemKillsResponse:
