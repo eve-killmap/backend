@@ -342,13 +342,14 @@ def test_fetch_system_kills_windowed_uses_daily_rollup(monkeypatch):
             return []
 
         async def fetchval(self, sql, *args):
-            return None
+            return 1757700000
 
     monkeypatch.setattr(q, "db", _FakeDb())
-    asyncio.run(q.fetch_system_kills(date(2026, 1, 1), date(2026, 3, 1)))
+    result = asyncio.run(q.fetch_system_kills(date(2026, 1, 1), date(2026, 3, 1)))
     assert "FROM system_kills_daily" in captured["sql"]
     assert "mv_kills_per_system_daily" not in captured["sql"]
     assert "day >=" in captured["sql"] and "day <" in captured["sql"]
+    assert result.computed_at == 1757700000
     assert captured["args"] == (date(2026, 1, 1), date(2026, 3, 1))
 
 
@@ -579,3 +580,28 @@ def test_system_kills_unfiltered_body_omits_null_computed_at(monkeypatch):
     flt = parse_filter([], max_conditions=8, max_ids=50)
     asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
     assert captured["value"] == '{"system_ids":[1],"kills":[5]}'
+
+
+def test_system_kills_filtered_body_omits_null_computed_at(monkeypatch):
+    # exclude_none must be applied by the filtered closure too, not only the
+    # unfiltered one.
+    from app.models import SystemKillsResponse
+
+    captured = {}
+
+    async def fake_get(prefix, params):
+        return None
+
+    async def fake_set(prefix, params, value, ttl=None):
+        captured["value"] = value
+        return '"e"', False, value.encode()
+
+    async def fake_fetch_filtered_map(flt, start, end):
+        return SystemKillsResponse(system_ids=[1], kills=[2])
+
+    monkeypatch.setattr(stats.query_cache, "get", fake_get)
+    monkeypatch.setattr(stats.query_cache, "set", fake_set)
+    monkeypatch.setattr(stats, "fetch_filtered_map", fake_fetch_filtered_map)
+    flt = parse_filter(["alliance:attacker:99005338"], max_conditions=8, max_ids=50)
+    asyncio.run(stats.get_system_kills_stats(flt=flt, if_none_match=None))
+    assert captured["value"] == '{"system_ids":[1],"kills":[2]}'

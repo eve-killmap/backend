@@ -3,8 +3,6 @@ import json
 from datetime import datetime, timezone
 from typing import get_args
 
-import pytest
-
 import app.leaderboards as lb
 import app.routers.stats as stats
 from app.config import config

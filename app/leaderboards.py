@@ -32,7 +32,7 @@ _KIND_IDS = [ATTRIBUTE_KINDS[k] for k in KINDS]
 _KIND_NAMES = {ATTRIBUTE_KINDS[k]: k for k in KINDS}
 
 _BOARD_SQL = (
-    "SELECT facet_kind, rank, facet_value, kill_count, computed_at "
+    "SELECT facet_kind, facet_value, kill_count, computed_at "
     "FROM entity_leaderboard "
     "WHERE facet_kind = ANY($1::smallint[]) AND role = $2 AND window_key = $3 "
     "AND rank <= $4 "

@@ -35,11 +35,15 @@ def test_singletons_accept_calls():
     for target in ("system_rankings", "farthest_kill", "sov", "leaderboards", "system_jumps"):
         pm.cache_invalidations_received.labels(target=target).inc()
         pm.cache_keys_evicted.labels(target=target).inc(3)
-    for endpoint in ("names", "corporation", "alliance", "war", "sov"):
-        for outcome in ("ok", "not_found", "rate_limited", "error"):
+    for endpoint in (
+        "corporation", "alliance", "sov", "sov_structures", "system_jumps", "status",
+    ):
+        for outcome in ("ok", "error"):
             pm.esi_requests.labels(endpoint=endpoint, outcome=outcome).inc()
         pm.esi_request_seconds.labels(endpoint=endpoint).observe(0.05)
-    for entity in ("character", "corporation", "alliance", "war", "sov"):
+    for entity in (
+        "corporation", "alliance", "sov", "sov_structures", "system_jumps", "status",
+    ):
         pm.esi_cache_hits.labels(entity=entity).inc()
         pm.esi_cache_misses.labels(entity=entity).inc()
     pm.broadcaster_is_leader.set(1)

@@ -119,9 +119,7 @@ async def build_system_kills(
         )
 
         async def build() -> str:
-            return (await fetch_system_kills(s, e)).model_dump_json(
-                exclude_none=True
-            )
+            return (await fetch_system_kills(s, e)).model_dump_json(exclude_none=True)
 
     else:
         key = flt.canonical()
@@ -154,7 +152,7 @@ async def get_system_kills_stats(
     """Per-system kill counts as index-aligned columns: kills[i] belongs to
     system_ids[i]. All-time by default; ``start``/``end`` restrict to a
     day-aligned, half-open UTC window ``[start, end)`` (either independently
-    optional). Unfiltered requests serve from the pre-computed MVs (cached
+    optional). Unfiltered requests serve from the pre-computed rollups (cached
     like /stats/system-rankings, same TTL). Filtered requests (``f=`` params)
     compute from ``kill_facets`` and cache under a separate prefix with their
     own TTL. `computed_at` is the rollup watermark for unfiltered requests and

@@ -10,6 +10,7 @@ import app.routers.stats as stats
 from app.config import config
 from app.filters import parse_filter, _bin_expr as _filters_bin_expr
 from app.filters import Filter
+from app.models import GlobalKillsResponse
 
 _L = dict(max_conditions=8, max_ids=50)
 
@@ -111,8 +112,6 @@ def test_global_kills_endpoint_single_flight_builds_once_default_bins(monkeypatc
         return res
 
     async def fake_fetch(map_type, bins):
-        from app.models import GlobalKillsResponse
-
         calls.append(bins)
         await asyncio.sleep(0.02)
         return GlobalKillsResponse(computed_at=1, counts=[0] * bins)
@@ -224,8 +223,6 @@ def test_global_kills_endpoint_filtered_builds_and_caches(monkeypatch):
         return store["k"]
 
     async def fake_filtered(f, map_type, bins):
-        from app.models import GlobalKillsResponse
-
         return GlobalKillsResponse(computed_at=1700000000, counts=[1, 2, 3])
 
     monkeypatch.setattr(stats.query_cache, "get", fake_get)
