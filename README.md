@@ -14,7 +14,9 @@ kills over WebSockets.
 ## Requirements
 
 - Python 3.12+
-- PostgreSQL (the shared kills database; read-only from here)
+- PostgreSQL (the shared kills database; read-only from here). Connections pin
+  `TimeZone=UTC`: the rollup tables define a day in the session zone, so the pin
+  keeps day boundaries stable whatever the server or pool default is.
 - Redis (response/ESI cache + live stream; the API degrades gracefully without it)
 
 ## Setup
@@ -36,7 +38,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 
 Endpoints (selected): `GET /kills/details/raw`, `GET /kills/details/processed`,
 `GET /systems/{id}/kills` (binary), `GET /systems/{id}/sov`,
-`GET /systems/{id}/jumps`, `GET /stats/system-rankings`,
+`GET /systems/{id}/jumps`, `GET /stats/system-rankings`, `GET /stats/leaderboards`,
 `GET /stats/system-jumps`, `GET /systems/{id}/farthest_kill`,
 `GET /universe/status`, `POST /universe/names`, WebSockets `/ws/global/kills`
 and `/ws/systems/{id}/kills`, and health (below). Logs go to the rotating file
@@ -81,18 +83,22 @@ fast with a clear `ConfigError`.
 
 ## Caching
 
-Hot shared endpoints (`system-rankings`, `sov`, `farthest_kill`, full-system
+Hot shared endpoints (`system-rankings`, `leaderboards`, `sov`, `farthest_kill`, full-system
 binary) are Redis-cached and carry `Cache-Control` / `ETag` / `Vary` headers for
 nginx/browser reuse. Per-killmail details are cached per id (immutable). Sov data
 is refreshed by the elected leader only. `since`-polls short-circuit via a
 DB-derived per-system latest-insert timestamp. Caches are evicted via the
 `cache:invalidate` Redis pub/sub channel.
 
-**Cross-app contract:** `process-kills` publishes `{"targets":
-["system_rankings", "farthest_kill"]}` to `cache:invalidate` after each
-materialized-view refresh; this service publishes `{"targets": ["sov"]}` after
-each sov refresh. Changing the `streaming.*` names is a breaking change to land in
-lockstep with `process-kills`.
+**Cross-app contract:** `process-kills` publishes to `cache:invalidate` after each
+refresh step: `system_rankings`, `system_kills`, `global_kills` (twice per fast
+cycle, after the daily rollup and again after the all-time matview refresh),
+`leaderboards` (after each board computation, fast and weekly), and
+`farthest_kill` (weekly). This service publishes `sov`, `sov_map` and
+`system_jumps` after its own ESI refreshes. Responses driven by process-kills
+signals carry `computed_at` (epoch seconds): the rollup watermark for the system
+panels, the board write time for leaderboards. Changing the `streaming.*` names is
+a breaking change to land in lockstep with `process-kills`.
 
 ## Metrics
 
