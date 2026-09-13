@@ -1,5 +1,4 @@
 import asyncio
-import json
 from datetime import date, datetime
 from typing import Annotated, Awaitable, Callable
 
@@ -217,7 +216,9 @@ async def build_global_kills(
         )
 
         async def build() -> str:
-            return json.dumps(await fetch_global_kills(map, bins))
+            return (await fetch_global_kills(map, bins)).model_dump_json(
+                exclude_none=True
+            )
 
     else:
         key = flt.canonical()
@@ -229,7 +230,9 @@ async def build_global_kills(
         )
 
         async def build() -> str:
-            return json.dumps(await fetch_filtered_global_kills(flt, map, bins))
+            return (await fetch_filtered_global_kills(flt, map, bins)).model_dump_json(
+                exclude_none=True
+            )
 
     return await _get_or_build(prefix, params, lock, ttl, build)
 
@@ -243,8 +246,10 @@ async def get_global_kills(
 ):
     """Per-map kill-count histogram over the fixed global time axis
     (EARLIEST_KILL_DATE..CURRENT_DATE), bucketed into ``bins`` equal-width bins
-    (default ``config.limits.global_kills_default_bins``). Returns a bare,
-    zero-filled, dense array of ``bins`` ints, oldest to newest. Without ``f=``
+    (default ``config.limits.global_kills_default_bins``). Returns
+    ``{"computed_at": N, "counts": [...]}`` where ``counts`` is a zero-filled,
+    dense array of ``bins`` ints, oldest to newest, and ``computed_at`` is the
+    rollup watermark (unfiltered) or the build time (filtered). Without ``f=``
     this serves the warmed rollup; with ``f=`` facet filters it counts only
     matching kills (same axis) from ``kill_facets``, cached separately."""
     if map not in MAP_RANGES:

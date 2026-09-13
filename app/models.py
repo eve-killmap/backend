@@ -148,6 +148,11 @@ class SystemKillsResponse(BaseModel):
     kills: list[int]  # kills[i] belongs to system_ids[i]
 
 
+class GlobalKillsResponse(BaseModel):
+    computed_at: int | None = None
+    counts: list[int]  # one bin per element, oldest to newest
+
+
 class SystemJumpsResponse(BaseModel):
     system_ids: list[int]
     jumps: list[int]  # jumps[i] belongs to system_ids[i]
