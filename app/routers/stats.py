@@ -9,6 +9,7 @@ from app.cache import query_cache, single_flight
 from app.esi import SYSTEM_JUMPS, esi_client
 from app.global_kills import fetch_global_kills, fetch_filtered_global_kills, MAP_RANGES
 from app.http_cache import json_cache_response
+from app.leaderboards import Role, Window, fetch_leaderboards
 from app.models import RankSystemsResponse, SystemJumpsResponse
 from app.queries import (
     fetch_top_systems,
@@ -258,3 +259,50 @@ async def get_global_kills(
     etag, gzipped, body = await build_global_kills(map, n, flt)
     ttl = config.cache.rankings_ttl if flt.is_empty else config.cache.filtered_map_ttl
     return json_cache_response(body, gzipped, etag, ttl, if_none_match, revalidate=True)
+
+
+async def build_leaderboards(
+    window: str, role: str, limit: int
+) -> tuple[str, bool, bytes]:
+    """Get-or-build-and-cache the leaderboards response for ``window``/``role``/``limit``.
+
+    Shared by the endpoint and the leader's cache-warm cycle; both must resolve
+    to the exact same cache key, so this must stay the sole owner of the
+    ``leaderboards`` prefix + params shape.
+    """
+
+    async def build() -> str:
+        return (await fetch_leaderboards(window, role, limit)).model_dump_json(
+            exclude_none=True
+        )
+
+    return await _get_or_build(
+        "leaderboards",
+        {"window": window, "role": role, "limit": limit},
+        f"leaderboards:{window}:{role}:{limit}",
+        config.cache.rankings_ttl,
+        build,
+    )
+
+
+@router.get("/stats/leaderboards", response_model=None)
+async def get_leaderboards(
+    window: Annotated[Window, Query(description="all, 1d, 7d, 30d, 6m or 1y")],
+    role: Annotated[
+        Role, Query(description="victim (kills lost) or attacker (kills made)")
+    ],
+    limit: Annotated[
+        int, Query(ge=1, le=50, description="Entries per board")
+    ] = config.limits.leaderboards_default_limit,
+    if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
+):
+    """Top entities by kill count for one window and role: one board per facet
+    kind (character, corporation, alliance, faction, ship, weapon), each in rank
+    order and possibly shorter than ``limit`` or empty. ``name``/``ticker`` are
+    omitted when unknown; ``computed_at`` is when process-kills wrote the
+    window's boards. Cached like /stats/system-rankings until a ``leaderboards``
+    invalidation."""
+    etag, gzipped, body = await build_leaderboards(window, role, limit)
+    return json_cache_response(
+        body, gzipped, etag, config.cache.rankings_ttl, if_none_match, revalidate=True
+    )

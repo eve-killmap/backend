@@ -426,3 +426,18 @@ def test_esi_feed_knobs_from_yaml(tmp_path):
     cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
     assert cfg.cache.esi_status_fallback_ttl == 45
     assert cfg.cache.esi_retry_max_seconds == 120
+
+
+def test_leaderboards_default_limit_default(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.limits.leaderboards_default_limit == 10
+
+
+def test_leaderboards_default_limit_from_yaml_and_bounds(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "limits:\n  leaderboards_default_limit: 25\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.limits.leaderboards_default_limit == 25
+    for bad in (0, 51):
+        yaml_path = _write_yaml(tmp_path, f"limits:\n  leaderboards_default_limit: {bad}\n")
+        with pytest.raises(ConfigError):
+            load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)

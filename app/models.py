@@ -153,6 +153,23 @@ class GlobalKillsResponse(BaseModel):
     counts: list[int]  # one bin per element, oldest to newest
 
 
+class LeaderboardEntry(BaseModel):
+    id: int
+    name: str | None = None
+    ticker: str | None = None
+    kills: int
+
+
+class LeaderboardsResponse(BaseModel):
+    computed_at: int | None = None
+    character: list[LeaderboardEntry]
+    corporation: list[LeaderboardEntry]
+    alliance: list[LeaderboardEntry]
+    faction: list[LeaderboardEntry]
+    ship: list[LeaderboardEntry]
+    weapon: list[LeaderboardEntry]
+
+
 class SystemJumpsResponse(BaseModel):
     system_ids: list[int]
     jumps: list[int]  # jumps[i] belongs to system_ids[i]

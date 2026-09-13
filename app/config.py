@@ -128,6 +128,7 @@ class LimitsConfig:
     max_war_ids: int
     encode_offload_min_rows: int
     system_rankings_default_limit: int
+    leaderboards_default_limit: int
     global_kills_default_bins: int
 
 
@@ -516,6 +517,12 @@ def load_config(
             limits_cfg.get("system_rankings_default_limit", 10),
             "limits.system_rankings_default_limit",
             minimum=1,
+        ),
+        leaderboards_default_limit=_as_int(
+            limits_cfg.get("leaderboards_default_limit", 10),
+            "limits.leaderboards_default_limit",
+            minimum=1,
+            maximum=50,
         ),
         global_kills_default_bins=_as_int(
             limits_cfg.get("global_kills_default_bins", 300),
