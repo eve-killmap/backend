@@ -1,0 +1,335 @@
+import asyncio
+
+from app.redis_client import KillBroadcaster, _LOCK_KEY
+
+
+class _FakeLockRedis:
+    def __init__(self):
+        self.store: dict[str, str] = {}
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+    async def get(self, key):
+        return self.store.get(key)
+
+    async def eval(self, script, numkeys, key, ident, ttl):
+        return 1 if self.store.get(key) == ident else 0
+
+    async def delete(self, key):
+        return 1 if self.store.pop(key, None) is not None else 0
+
+
+def _stub_promote_demote(b: KillBroadcaster) -> None:
+    async def promote():
+        b._is_leader = True
+
+    async def demote():
+        b._is_leader = False
+
+    b._promote = promote  # type: ignore[method-assign]
+    b._demote = demote  # type: ignore[method-assign]
+
+
+def test_acquires_leadership_when_lock_free():
+    b = KillBroadcaster()
+    b._redis = _FakeLockRedis()  # type: ignore[assignment]
+    _stub_promote_demote(b)
+
+    asyncio.run(b._election_step())
+
+    assert b._is_leader is True
+    assert b._redis.store[_LOCK_KEY] == b._instance_id  # type: ignore[attr-defined]
+
+
+def test_second_instance_stays_follower():
+    shared = _FakeLockRedis()
+    b1 = KillBroadcaster()
+    b1._redis = shared  # type: ignore[assignment]
+    b2 = KillBroadcaster()
+    b2._redis = shared  # type: ignore[assignment]
+    _stub_promote_demote(b1)
+    _stub_promote_demote(b2)
+
+    asyncio.run(b1._election_step())
+    asyncio.run(b2._election_step())
+
+    assert b1._is_leader is True
+    assert b2._is_leader is False
+
+
+def test_follower_takes_over_when_leader_lock_expires():
+    shared = _FakeLockRedis()
+    b1 = KillBroadcaster()
+    b1._redis = shared  # type: ignore[assignment]
+    b2 = KillBroadcaster()
+    b2._redis = shared  # type: ignore[assignment]
+    _stub_promote_demote(b1)
+    _stub_promote_demote(b2)
+
+    asyncio.run(b1._election_step())
+    asyncio.run(b2._election_step())
+    assert b2._is_leader is False
+
+    shared.store.clear()
+
+    asyncio.run(b2._election_step())
+    assert b2._is_leader is True
+    assert shared.store[_LOCK_KEY] == b2._instance_id
+
+
+def test_leader_election_disabled_never_acquires(monkeypatch):
+    import types
+    import app.redis_client as rc
+
+    b = KillBroadcaster()
+    b._redis = _FakeLockRedis()  # type: ignore[assignment]
+    _stub_promote_demote(b)
+    monkeypatch.setattr(rc, "config", types.SimpleNamespace(leader_election=False))
+
+    asyncio.run(b._election_step())
+
+    assert b._is_leader is False
+    assert _LOCK_KEY not in b._redis.store  # type: ignore[attr-defined]
+
+
+def test_leader_demotes_when_lock_stolen():
+    b = KillBroadcaster()
+    shared = _FakeLockRedis()
+    b._redis = shared  # type: ignore[assignment]
+    _stub_promote_demote(b)
+
+    b._is_leader = True
+    shared.store[_LOCK_KEY] = "someone-else"
+
+    asyncio.run(b._election_step())
+
+    assert b._is_leader is False
+    assert shared.store[_LOCK_KEY] == "someone-else"
+
+
+class _FakeStreamRedis:
+    def __init__(self, last_id=None, exc=None):
+        self._last_id = last_id
+        self._exc = exc
+
+    async def xinfo_stream(self, name):
+        if self._exc is not None:
+            raise self._exc
+        return {"last-generated-id": self._last_id}
+
+
+def test_resolve_start_id_uses_last_generated_id():
+    b = KillBroadcaster()
+    b._redis = _FakeStreamRedis(last_id="1720000000000-0")  # type: ignore[assignment]
+    assert asyncio.run(b._resolve_start_id()) == "1720000000000-0"
+
+
+def test_resolve_start_id_falls_back_when_stream_missing():
+    from redis.exceptions import ResponseError
+
+    b = KillBroadcaster()
+    b._redis = _FakeStreamRedis(exc=ResponseError("no such key"))  # type: ignore[assignment]
+    assert asyncio.run(b._resolve_start_id()) == "$"
+
+
+import app.prometheus_metrics as pm  # noqa: E402
+from prometheus_client import REGISTRY  # noqa: E402
+
+
+def _sample(name, labels=None):
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+def test_subscribe_unsubscribe_updates_live_clients_gauge():
+    b = KillBroadcaster()
+    base = _sample("eve_killmap_live_clients", {"transport": "ws"})
+    q = b.subscribe_global()
+    assert _sample("eve_killmap_live_clients", {"transport": "ws"}) - base == 1
+    b.unsubscribe_global(q)
+    assert _sample("eve_killmap_live_clients", {"transport": "ws"}) - base == 0
+    b.unsubscribe_global(q)
+    assert _sample("eve_killmap_live_clients", {"transport": "ws"}) - base == 0
+
+
+def test_fanout_counts_dropped_messages():
+    b = KillBroadcaster()
+    full = asyncio.Queue(maxsize=1)
+    full.put_nowait({"already": "full"})
+    b._global_subs.add(full)  # type: ignore[attr-defined]
+    d0 = _sample("eve_killmap_ws_messages_dropped_total")
+    b._fanout({"solar_system_id": 30000142})
+    assert _sample("eve_killmap_ws_messages_dropped_total") - d0 == 1
+
+
+import app.entities as entities  # noqa: E402
+import app.redis_client as rc  # noqa: E402
+
+
+def test_enrich_kill_uses_db(monkeypatch):
+    async def fake_entities(char_ids, corp_ids, alliance_ids, faction_ids):
+        return ({1: "Pilot"}, {10: ("Corp", "TIC")}, {20: ("Alli", "AL1")}, {})
+
+    async def fake_types(ids):
+        return {587: "Rifter"}
+
+    monkeypatch.setattr(entities, "fetch_entity_names", fake_entities)
+    monkeypatch.setattr(rc, "get_type_names", fake_types)
+
+    kill = {
+        "killmail_id": 42,
+        "victim_character_id": 1,
+        "victim_ship_type_id": 587,
+        "victim_corporation_id": 10,
+        "victim_alliance_id": 20,
+        "attackers": [
+            {
+                "final_blow": True,
+                "character_id": 1,
+                "ship_type_id": 587,
+                "corporation_id": 10,
+                "alliance_id": 20,
+            }
+        ],
+    }
+    out = asyncio.run(rc._enrich_kill(kill))
+    assert out["v_character_name"] == "Pilot"
+    assert out["v_corporation_name"] == "Corp"
+    assert out["v_alliance_name"] == "Alli"
+    assert out["v_ship_name"] == "Rifter"
+
+
+def test_enrich_kill_resilient_on_db_error(monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(entities, "fetch_entity_names", boom)
+
+    async def fake_types(ids):
+        return {}
+
+    monkeypatch.setattr(rc, "get_type_names", fake_types)
+    kill = {
+        "killmail_id": 7,
+        "victim_character_id": 1,
+        "victim_ship_type_id": 587,
+        "victim_corporation_id": 10,
+        "victim_alliance_id": 20,
+        "attackers": [],
+    }
+    out = asyncio.run(rc._enrich_kill(kill))
+    assert out["v_character_name"] is None
+    assert out["v_corporation_name"] is None
+
+
+class _FakeLeaderRedis(_FakeLockRedis):
+    def __init__(self):
+        super().__init__()
+        self.xread_calls = 0
+
+    async def xinfo_stream(self, name):
+        from redis.exceptions import ResponseError
+
+        raise ResponseError("no such key")
+
+    async def xread(self, streams, block=None, count=None):
+        self.xread_calls += 1
+        await asyncio.Event().wait()
+
+    async def aclose(self):
+        pass
+
+
+class _StalledEsi:
+    def __init__(self):
+        self.feeds: list[str] = []
+
+    async def refresh(self, feed):
+        self.feeds.append(feed.name)
+        await asyncio.Event().wait()
+
+
+async def _promoted(monkeypatch):
+    esi = _StalledEsi()
+    monkeypatch.setattr(rc, "esi_client", esi)
+    b = KillBroadcaster()
+    redis = _FakeLeaderRedis()
+    b._redis = redis  # type: ignore[assignment]
+    await b._promote()
+    await asyncio.sleep(0)
+    return b, esi, redis
+
+
+def test_promote_starts_one_task_per_feed_plus_the_leader_loop(monkeypatch):
+    async def scenario():
+        b, esi, redis = await _promoted(monkeypatch)
+        try:
+            assert b._is_leader is True
+            assert len(b._leader_tasks) == len(rc.LEADER_FEEDS) + 1
+            assert sorted(esi.feeds) == sorted(f.name for f in rc.LEADER_FEEDS)
+            assert redis.xread_calls == 1
+            assert all(not t.done() for t in b._leader_tasks)
+        finally:
+            await b._demote()
+
+    asyncio.run(scenario())
+
+
+def test_demote_cancels_every_leader_task(monkeypatch):
+    async def scenario():
+        b, _, _ = await _promoted(monkeypatch)
+        tasks = list(b._leader_tasks)
+        await b._demote()
+
+        assert b._is_leader is False
+        assert b._leader_tasks == []
+        assert all(t.cancelled() for t in tasks)
+
+    asyncio.run(scenario())
+
+
+def test_promote_demote_promote_does_not_accumulate_tasks(monkeypatch):
+    async def scenario():
+        b, _, _ = await _promoted(monkeypatch)
+        first = list(b._leader_tasks)
+        await b._demote()
+        await b._promote()
+        await asyncio.sleep(0)
+        try:
+            assert len(b._leader_tasks) == len(rc.LEADER_FEEDS) + 1
+            assert not set(first) & set(b._leader_tasks)
+        finally:
+            await b._demote()
+
+    asyncio.run(scenario())
+
+
+def test_second_promote_while_leader_is_a_no_op(monkeypatch):
+    async def scenario():
+        b, esi, _ = await _promoted(monkeypatch)
+        tasks = list(b._leader_tasks)
+        await b._promote()
+        await asyncio.sleep(0)
+        try:
+            assert b._leader_tasks == tasks
+            assert len(esi.feeds) == len(rc.LEADER_FEEDS)
+        finally:
+            await b._demote()
+
+    asyncio.run(scenario())
+
+
+def test_stop_cancels_leader_tasks(monkeypatch):
+    async def scenario():
+        b, _, _ = await _promoted(monkeypatch)
+        tasks = list(b._leader_tasks)
+        await b.stop()
+
+        assert b._leader_tasks == []
+        assert all(t.cancelled() for t in tasks)
+        assert b._is_leader is False
+
+    asyncio.run(scenario())

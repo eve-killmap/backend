@@ -1,0 +1,626 @@
+from __future__ import annotations
+
+import logging
+import os
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any
+
+import yaml
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_CONFIG_PATH = BASE_DIR / "config.yml"
+
+SERVICE_VERSION = "1.0.0"
+
+VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+UVICORN_LOGGER_NAMES = ("uvicorn", "uvicorn.error", "uvicorn.access")
+
+_DEFAULT_USER_AGENT = (
+    "eve-killmap:backend/1.0.0 (+https://github.com/eve-killmap/backend)"
+)
+
+_DEFAULT_CORS_ORIGINS = ["http://127.0.0.1:3000", "http://localhost:3000"]
+
+
+class ConfigError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class LoggingConfig:
+    level: str
+    file: Path
+    max_bytes: int
+    backup_count: int
+
+
+@dataclass(frozen=True)
+class CorsConfig:
+    allow_origins: list[str]
+    allow_methods: list[str]
+    allow_headers: list[str]
+    expose_headers: list[str]
+
+
+@dataclass(frozen=True)
+class DatabaseConfig:
+    pool_min_size: int
+    pool_max_size: int
+    connect_max_retry_seconds: int
+    connect_retry_max_delay_seconds: int
+
+
+@dataclass(frozen=True)
+class CacheConfig:
+    query_ttl: int
+    binary_ttl: int
+    type_name_ttl: int
+    esi_corp_ttl: int
+    esi_alliance_ttl: int
+    esi_sov_fallback_ttl: int
+    esi_sov_structures_fallback_ttl: int
+    rankings_ttl: int
+    sov_ttl: int
+    farthest_kill_ttl: int
+    kill_detail_ttl: int
+    kill_detail_processed_ttl: int
+    system_latest_ttl: int
+    filtered_map_ttl: int
+    filtered_system_ttl: int
+    autocomplete_ttl: int
+    war_search_ttl: int
+    war_details_ttl: int
+    sov_map_ttl: int
+    esi_system_jumps_fallback_ttl: int
+    esi_status_fallback_ttl: int
+    system_jumps_ttl: int
+    system_jumps_max_age: int
+    esi_retry_initial_seconds: int
+    esi_retry_max_seconds: int
+    sov_max_age: int
+    status_max_age: int
+    farthest_kill_max_age: int
+    system_activity_ttl: int
+    warm_on_signal: bool
+
+
+@dataclass(frozen=True)
+class CacheRedisConfig:
+    max_connections: int
+    pool_timeout: int
+    socket_connect_timeout: int
+    socket_timeout: int
+    socket_keepalive: bool
+    health_check_interval: int
+
+
+@dataclass(frozen=True)
+class StreamingConfig:
+    stream_name: str
+    pubsub_channel: str
+    invalidate_channel: str
+
+
+@dataclass(frozen=True)
+class HealthConfig:
+    heartbeat_interval: int
+    heartbeat_ttl: int
+    expected_workers: int | None
+
+
+@dataclass(frozen=True)
+class LimitsConfig:
+    max_killmail_ids: int
+    max_name_ids: int
+    max_ws_connections: int
+    max_filter_conditions: int
+    max_filter_ids_per_condition: int
+    autocomplete_min_length: int
+    max_war_results: int
+    max_war_ids: int
+    encode_offload_min_rows: int
+    system_rankings_default_limit: int
+    leaderboards_default_limit: int
+    global_kills_default_bins: int
+    system_activity_default_bins: int
+
+
+@dataclass(frozen=True)
+class MetricsConfig:
+    enabled: bool
+    host: str
+    port: int
+
+
+@dataclass(frozen=True)
+class Config:
+    logging: LoggingConfig
+    cors: CorsConfig
+    database: DatabaseConfig
+    cache: CacheConfig
+    cache_redis: CacheRedisConfig
+    streaming: StreamingConfig
+    health: HealthConfig
+    limits: LimitsConfig
+    metrics: MetricsConfig
+    user_agent: str
+    database_url: str | None
+    redis_url: str | None
+    redis_cache_url: str | None
+    health_token: str | None
+    worker_id: str | None
+    leader_election: bool
+
+
+def worker_log_file(path: Path, worker_id: str | None) -> Path:
+    if not worker_id:
+        return path
+    return path.with_name(f"{path.stem}.worker-{worker_id}{path.suffix}")
+
+
+def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
+    section = data.get(name) or {}
+    if not isinstance(section, dict):
+        raise ConfigError(f"Config section '{name}' must be a mapping")
+    return section
+
+
+def _as_int(
+    value: Any, label: str, *, minimum: int | None = None, maximum: int | None = None
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"Config value '{label}' must be an integer, got {value!r}")
+    if minimum is not None and value < minimum:
+        raise ConfigError(f"Config value '{label}' must be >= {minimum}, got {value}")
+    if maximum is not None and value > maximum:
+        raise ConfigError(f"Config value '{label}' must be <= {maximum}, got {value}")
+    return value
+
+
+def _as_str_list(value: Any, label: str) -> list[str]:
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    raise ConfigError(
+        f"Config value '{label}' must be a list or comma-separated string"
+    )
+
+
+def _load_yaml(yaml_path: Path) -> dict[str, Any]:
+    if not yaml_path.exists():
+        return {}
+    try:
+        loaded = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Could not parse config file {yaml_path}: {exc}") from exc
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ConfigError(f"Config file {yaml_path} must contain a top-level mapping")
+    return loaded
+
+
+def load_config(
+    yaml_path: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    base_dir: Path | None = None,
+) -> Config:
+    base_dir = base_dir or BASE_DIR
+    env = os.environ if env is None else env
+    data = _load_yaml(yaml_path or DEFAULT_CONFIG_PATH)
+
+    log_cfg = _section(data, "logging")
+    cors_cfg = _section(data, "cors")
+    db_cfg = _section(data, "database")
+    cache_cfg = _section(data, "cache")
+    cache_redis_cfg = _section(data, "cache_redis")
+    stream_cfg = _section(data, "streaming")
+    health_cfg = _section(data, "health")
+    limits_cfg = _section(data, "limits")
+    metrics_cfg = _section(data, "metrics")
+
+    level = (env.get("LOG_LEVEL") or log_cfg.get("level") or "INFO").upper()
+    if level not in VALID_LOG_LEVELS:
+        raise ConfigError(
+            f"Invalid log level {level!r}; expected one of {sorted(VALID_LOG_LEVELS)}"
+        )
+
+    log_file = Path(env.get("LOG_FILE") or log_cfg.get("file") or "backend.log")
+    if not log_file.is_absolute():
+        log_file = base_dir / log_file
+
+    worker_id = env.get("WORKER_ID") or None
+    log_file = worker_log_file(log_file, worker_id)
+
+    leader_election = (env.get("LEADER_ELECTION") or "true").strip().lower() != "false"
+
+    logging_config = LoggingConfig(
+        level=level,
+        file=log_file,
+        max_bytes=_as_int(
+            log_cfg.get("max_bytes", 10 * 1024 * 1024), "logging.max_bytes", minimum=1
+        ),
+        backup_count=_as_int(
+            log_cfg.get("backup_count", 5), "logging.backup_count", minimum=0
+        ),
+    )
+
+    cors_config = CorsConfig(
+        allow_origins=_as_str_list(
+            cors_cfg.get("allow_origins", _DEFAULT_CORS_ORIGINS), "cors.allow_origins"
+        ),
+        allow_methods=_as_str_list(
+            cors_cfg.get("allow_methods", ["GET"]), "cors.allow_methods"
+        ),
+        allow_headers=_as_str_list(
+            cors_cfg.get("allow_headers", ["*"]), "cors.allow_headers"
+        ),
+        expose_headers=_as_str_list(
+            cors_cfg.get("expose_headers", ["X-Kills-Fresh-To"]),
+            "cors.expose_headers",
+        ),
+    )
+
+    database_config = DatabaseConfig(
+        pool_min_size=_as_int(
+            db_cfg.get("pool_min_size", 5), "database.pool_min_size", minimum=1
+        ),
+        pool_max_size=_as_int(
+            db_cfg.get("pool_max_size", 20), "database.pool_max_size", minimum=1
+        ),
+        connect_max_retry_seconds=_as_int(
+            db_cfg.get("connect_max_retry_seconds", 60),
+            "database.connect_max_retry_seconds",
+            minimum=0,
+        ),
+        connect_retry_max_delay_seconds=_as_int(
+            db_cfg.get("connect_retry_max_delay_seconds", 10),
+            "database.connect_retry_max_delay_seconds",
+            minimum=1,
+        ),
+    )
+    if database_config.pool_max_size < database_config.pool_min_size:
+        raise ConfigError("database.pool_max_size must be >= database.pool_min_size")
+
+    cache_warm_on_signal = cache_cfg.get("warm_on_signal", True)
+    if not isinstance(cache_warm_on_signal, bool):
+        raise ConfigError("Config value 'cache.warm_on_signal' must be a boolean")
+
+    cache_config = CacheConfig(
+        query_ttl=_as_int(
+            cache_cfg.get("query_ttl", 300), "cache.query_ttl", minimum=1
+        ),
+        binary_ttl=_as_int(
+            cache_cfg.get("binary_ttl", 300), "cache.binary_ttl", minimum=1
+        ),
+        type_name_ttl=_as_int(
+            cache_cfg.get("type_name_ttl", 2592000), "cache.type_name_ttl", minimum=1
+        ),
+        esi_corp_ttl=_as_int(
+            cache_cfg.get("esi_corp_ttl", 86400), "cache.esi_corp_ttl", minimum=1
+        ),
+        esi_alliance_ttl=_as_int(
+            cache_cfg.get("esi_alliance_ttl", 86400),
+            "cache.esi_alliance_ttl",
+            minimum=1,
+        ),
+        esi_sov_fallback_ttl=_as_int(
+            cache_cfg.get("esi_sov_fallback_ttl", 3600),
+            "cache.esi_sov_fallback_ttl",
+            minimum=1,
+        ),
+        esi_sov_structures_fallback_ttl=_as_int(
+            cache_cfg.get("esi_sov_structures_fallback_ttl", 3600),
+            "cache.esi_sov_structures_fallback_ttl",
+            minimum=1,
+        ),
+        rankings_ttl=_as_int(
+            cache_cfg.get("rankings_ttl", 3600), "cache.rankings_ttl", minimum=1
+        ),
+        sov_ttl=_as_int(cache_cfg.get("sov_ttl", 3600), "cache.sov_ttl", minimum=1),
+        farthest_kill_ttl=_as_int(
+            cache_cfg.get("farthest_kill_ttl", 21600),
+            "cache.farthest_kill_ttl",
+            minimum=1,
+        ),
+        kill_detail_ttl=_as_int(
+            cache_cfg.get("kill_detail_ttl", 604800), "cache.kill_detail_ttl", minimum=1
+        ),
+        kill_detail_processed_ttl=_as_int(
+            cache_cfg.get("kill_detail_processed_ttl", 3600),
+            "cache.kill_detail_processed_ttl",
+            minimum=1,
+        ),
+        system_latest_ttl=_as_int(
+            cache_cfg.get("system_latest_ttl", 10), "cache.system_latest_ttl", minimum=1
+        ),
+        filtered_map_ttl=_as_int(
+            cache_cfg.get("filtered_map_ttl", 1800), "cache.filtered_map_ttl", minimum=1
+        ),
+        filtered_system_ttl=_as_int(
+            cache_cfg.get("filtered_system_ttl", 15),
+            "cache.filtered_system_ttl",
+            minimum=1,
+        ),
+        autocomplete_ttl=_as_int(
+            cache_cfg.get("autocomplete_ttl", 60), "cache.autocomplete_ttl", minimum=1
+        ),
+        war_search_ttl=_as_int(
+            cache_cfg.get("war_search_ttl", 60), "cache.war_search_ttl", minimum=1
+        ),
+        war_details_ttl=_as_int(
+            cache_cfg.get("war_details_ttl", 21600), "cache.war_details_ttl", minimum=1
+        ),
+        sov_map_ttl=_as_int(
+            cache_cfg.get("sov_map_ttl", 3600), "cache.sov_map_ttl", minimum=1
+        ),
+        esi_system_jumps_fallback_ttl=_as_int(
+            cache_cfg.get("esi_system_jumps_fallback_ttl", 3600),
+            "cache.esi_system_jumps_fallback_ttl",
+            minimum=1,
+        ),
+        esi_status_fallback_ttl=_as_int(
+            cache_cfg.get("esi_status_fallback_ttl", 30),
+            "cache.esi_status_fallback_ttl",
+            minimum=1,
+        ),
+        system_jumps_ttl=_as_int(
+            cache_cfg.get("system_jumps_ttl", 3600), "cache.system_jumps_ttl", minimum=1
+        ),
+        system_jumps_max_age=_as_int(
+            cache_cfg.get("system_jumps_max_age", 900),
+            "cache.system_jumps_max_age",
+            minimum=0,
+        ),
+        esi_retry_initial_seconds=_as_int(
+            cache_cfg.get("esi_retry_initial_seconds", 30),
+            "cache.esi_retry_initial_seconds",
+            minimum=1,
+        ),
+        esi_retry_max_seconds=_as_int(
+            cache_cfg.get("esi_retry_max_seconds", 600),
+            "cache.esi_retry_max_seconds",
+            minimum=1,
+        ),
+        sov_max_age=_as_int(
+            cache_cfg.get("sov_max_age", 900), "cache.sov_max_age", minimum=0
+        ),
+        status_max_age=_as_int(
+            cache_cfg.get("status_max_age", 15), "cache.status_max_age", minimum=0
+        ),
+        farthest_kill_max_age=_as_int(
+            cache_cfg.get("farthest_kill_max_age", 3600),
+            "cache.farthest_kill_max_age",
+            minimum=0,
+        ),
+        system_activity_ttl=_as_int(
+            cache_cfg.get("system_activity_ttl", 300),
+            "cache.system_activity_ttl",
+            minimum=1,
+        ),
+        warm_on_signal=cache_warm_on_signal,
+    )
+
+    cache_redis_keepalive = cache_redis_cfg.get("socket_keepalive", True)
+    if not isinstance(cache_redis_keepalive, bool):
+        raise ConfigError(
+            "Config value 'cache_redis.socket_keepalive' must be a boolean"
+        )
+    cache_redis_config = CacheRedisConfig(
+        max_connections=_as_int(
+            cache_redis_cfg.get("max_connections", 200),
+            "cache_redis.max_connections",
+            minimum=1,
+        ),
+        pool_timeout=_as_int(
+            cache_redis_cfg.get("pool_timeout", 5),
+            "cache_redis.pool_timeout",
+            minimum=1,
+        ),
+        socket_connect_timeout=_as_int(
+            cache_redis_cfg.get("socket_connect_timeout", 5),
+            "cache_redis.socket_connect_timeout",
+            minimum=1,
+        ),
+        socket_timeout=_as_int(
+            cache_redis_cfg.get("socket_timeout", 10),
+            "cache_redis.socket_timeout",
+            minimum=1,
+        ),
+        socket_keepalive=cache_redis_keepalive,
+        health_check_interval=_as_int(
+            cache_redis_cfg.get("health_check_interval", 30),
+            "cache_redis.health_check_interval",
+            minimum=1,
+        ),
+    )
+
+    streaming_config = StreamingConfig(
+        stream_name=stream_cfg.get("stream_name", "kills:live"),
+        pubsub_channel=stream_cfg.get("pubsub_channel", "kills:enriched"),
+        invalidate_channel=stream_cfg.get("invalidate_channel", "cache:invalidate"),
+    )
+
+    expected_workers_raw = health_cfg.get("expected_workers")
+    health_config = HealthConfig(
+        heartbeat_interval=_as_int(
+            health_cfg.get("heartbeat_interval", 10),
+            "health.heartbeat_interval",
+            minimum=1,
+        ),
+        heartbeat_ttl=_as_int(
+            health_cfg.get("heartbeat_ttl", 30), "health.heartbeat_ttl", minimum=1
+        ),
+        expected_workers=(
+            None
+            if expected_workers_raw is None
+            else _as_int(expected_workers_raw, "health.expected_workers", minimum=1)
+        ),
+    )
+
+    limits_config = LimitsConfig(
+        max_killmail_ids=_as_int(
+            limits_cfg.get("max_killmail_ids", 100),
+            "limits.max_killmail_ids",
+            minimum=1,
+        ),
+        max_name_ids=_as_int(
+            limits_cfg.get("max_name_ids", 100), "limits.max_name_ids", minimum=1
+        ),
+        max_ws_connections=_as_int(
+            limits_cfg.get("max_ws_connections", 1000),
+            "limits.max_ws_connections",
+            minimum=1,
+        ),
+        max_filter_conditions=_as_int(
+            limits_cfg.get("max_filter_conditions", 8),
+            "limits.max_filter_conditions",
+            minimum=1,
+        ),
+        max_filter_ids_per_condition=_as_int(
+            limits_cfg.get("max_filter_ids_per_condition", 50),
+            "limits.max_filter_ids_per_condition",
+            minimum=1,
+        ),
+        autocomplete_min_length=_as_int(
+            limits_cfg.get("autocomplete_min_length", 3),
+            "limits.autocomplete_min_length",
+            minimum=1,
+        ),
+        max_war_results=_as_int(
+            limits_cfg.get("max_war_results", 500),
+            "limits.max_war_results",
+            minimum=1,
+        ),
+        max_war_ids=_as_int(
+            limits_cfg.get("max_war_ids", 200),
+            "limits.max_war_ids",
+            minimum=1,
+        ),
+        encode_offload_min_rows=_as_int(
+            limits_cfg.get("encode_offload_min_rows", 2000),
+            "limits.encode_offload_min_rows",
+            minimum=1,
+        ),
+        system_rankings_default_limit=_as_int(
+            limits_cfg.get("system_rankings_default_limit", 10),
+            "limits.system_rankings_default_limit",
+            minimum=1,
+        ),
+        leaderboards_default_limit=_as_int(
+            limits_cfg.get("leaderboards_default_limit", 10),
+            "limits.leaderboards_default_limit",
+            minimum=1,
+            maximum=50,
+        ),
+        global_kills_default_bins=_as_int(
+            limits_cfg.get("global_kills_default_bins", 300),
+            "limits.global_kills_default_bins",
+            minimum=1,
+        ),
+        system_activity_default_bins=_as_int(
+            limits_cfg.get("system_activity_default_bins", 48),
+            "limits.system_activity_default_bins",
+            minimum=1,
+            maximum=720,
+        ),
+    )
+
+    metrics_enabled = metrics_cfg.get("enabled", False)
+    if not isinstance(metrics_enabled, bool):
+        raise ConfigError("Config value 'metrics.enabled' must be a boolean")
+
+    metrics_host = env.get("METRICS_HOST") or "127.0.0.1"
+
+    metrics_port_env = env.get("METRICS_PORT")
+    if metrics_port_env:
+        try:
+            metrics_port_value: Any = int(metrics_port_env)
+        except ValueError:
+            raise ConfigError(
+                f"METRICS_PORT must be an integer, got {metrics_port_env!r}"
+            )
+    else:
+        metrics_port_value = 9109
+    metrics_port = _as_int(metrics_port_value, "METRICS_PORT", minimum=1, maximum=65535)
+
+    metrics_config = MetricsConfig(
+        enabled=metrics_enabled, host=metrics_host, port=metrics_port
+    )
+
+    return Config(
+        logging=logging_config,
+        cors=cors_config,
+        database=database_config,
+        cache=cache_config,
+        cache_redis=cache_redis_config,
+        streaming=streaming_config,
+        health=health_config,
+        limits=limits_config,
+        metrics=metrics_config,
+        user_agent=env.get("USER_AGENT") or _DEFAULT_USER_AGENT,
+        database_url=env.get("DATABASE_URL") or None,
+        redis_url=env.get("REDIS_URL") or None,
+        redis_cache_url=env.get("REDIS_CACHE_URL") or None,
+        health_token=env.get("HEALTH_TOKEN") or None,
+        worker_id=worker_id,
+        leader_election=leader_election,
+    )
+
+
+def require_database_url(config: Config) -> str:
+    if not config.database_url:
+        raise ConfigError("DATABASE_URL is required but not set (define it in .env)")
+    return config.database_url
+
+
+def configure_uvicorn_loggers(level: str) -> None:
+    for name in UVICORN_LOGGER_NAMES:
+        uv_log = logging.getLogger(name)
+        uv_log.handlers = []
+        uv_log.propagate = True
+        uv_log.setLevel(level)
+
+
+def setup_logging(config: Config) -> None:
+    root_logger = logging.getLogger()
+    root_logger.setLevel(config.logging.level)
+
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+        handler.close()
+
+    if config.worker_id:
+        fmt = f"[%(asctime)s] [worker {config.worker_id}] [%(levelname)s] [%(name)s] %(message)s"
+    else:
+        fmt = "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"
+    formatter = logging.Formatter(fmt)
+
+    config.logging.file.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        config.logging.file,
+        maxBytes=config.logging.max_bytes,
+        backupCount=config.logging.backup_count,
+    )
+    file_handler.setFormatter(formatter)
+    # Propagated third-party records bypass the root level, handlers must filter them
+    file_handler.setLevel(config.logging.level)
+    root_logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(config.logging.level)
+    root_logger.addHandler(console_handler)
+
+    configure_uvicorn_loggers(config.logging.level)
+
+
+load_dotenv(BASE_DIR / ".env")
+config = load_config()

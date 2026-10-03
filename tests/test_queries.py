@@ -1,0 +1,188 @@
+import asyncio
+
+from app.queries import normalize_farthest_kill
+
+import app.queries as queries
+import app.prometheus_metrics as pm  # noqa: F401
+from prometheus_client import REGISTRY
+
+
+def test_normalize_none_is_minus_one():
+    assert normalize_farthest_kill(None) == -1
+
+
+def test_normalize_rounds_to_int():
+    assert normalize_farthest_kill(1234.0) == 1234
+    assert normalize_farthest_kill(0.0) == 0
+
+
+def _sample(name, labels=None):
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+class _FakeMget:
+    def __init__(self, values):
+        self._values = values
+
+    async def mget(self, *keys):
+        return self._values
+
+
+def test_get_type_names_hit_metric(monkeypatch):
+    monkeypatch.setattr(queries, "_redis", _FakeMget(["Rifter"]))
+    h0 = _sample("eve_killmap_cache_hits_total", {"cache": "type_name"})
+    f0 = _sample(
+        "eve_killmap_entity_lookups_total", {"kind": "type", "result": "found"}
+    )
+    result = asyncio.run(queries.get_type_names({587}))
+    assert result == {587: "Rifter"}
+    assert _sample("eve_killmap_cache_hits_total", {"cache": "type_name"}) - h0 == 1
+    assert (
+        _sample("eve_killmap_entity_lookups_total", {"kind": "type", "result": "found"})
+        - f0
+        == 1
+    )
+
+
+def test_get_type_names_counts_missing_ids(monkeypatch):
+    monkeypatch.setattr(queries, "_redis", None)
+    monkeypatch.setattr(queries, "db", _FakeDbFetch([{"id": 587, "name": "Rifter"}]))
+    f0 = _sample(
+        "eve_killmap_entity_lookups_total", {"kind": "type", "result": "found"}
+    )
+    m0 = _sample(
+        "eve_killmap_entity_lookups_total", {"kind": "type", "result": "missing"}
+    )
+    result = asyncio.run(queries.get_type_names({587, 999999}))
+    assert result == {587: "Rifter"}
+    assert (
+        _sample("eve_killmap_entity_lookups_total", {"kind": "type", "result": "found"})
+        - f0
+        == 1
+    )
+    assert (
+        _sample(
+            "eve_killmap_entity_lookups_total", {"kind": "type", "result": "missing"}
+        )
+        - m0
+        == 1
+    )
+
+
+def test_get_kill_details_cached_hit_metric(monkeypatch):
+    from datetime import datetime, timezone
+
+    from app.models import KillDetail, Victim
+
+    ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    kill = KillDetail(
+        killmail_id=42,
+        killmail_time=ts,
+        position=(0.0, 0.0, 0.0),
+        war_id=None,
+        victim=Victim(
+            character_id=1,
+            corporation_id=None,
+            alliance_id=None,
+            faction_id=None,
+            damage_taken=1,
+            ship_type_id=587,
+        ),
+        attackers=[],
+        inserted_time=ts,
+    )
+    monkeypatch.setattr(queries, "_redis", _FakeMget([kill.model_dump_json()]))
+    h0 = _sample("eve_killmap_cache_hits_total", {"cache": "kill_details"})
+    resp = asyncio.run(queries.get_kill_details_cached([42]))
+    assert resp.count == 1
+    assert _sample("eve_killmap_cache_hits_total", {"cache": "kill_details"}) - h0 == 1
+
+
+class _FakeDbCapture:
+    def __init__(self, value):
+        self._value = value
+        self.query = None
+        self.args = None
+
+    async def fetchval(self, query, *args):
+        self.query = query
+        self.args = args
+        return self._value
+
+
+def test_fetch_system_latest_inserted_floors_epoch(monkeypatch):
+    fake = _FakeDbCapture(1700000000)
+    monkeypatch.setattr(queries, "db", fake)
+    result = asyncio.run(queries.fetch_system_latest_inserted(30000142))
+    assert result == 1700000000
+    assert "FLOOR(EXTRACT(EPOCH FROM MAX(inserted_time)))" in fake.query
+
+
+class _FakeDbFetch:
+    def __init__(self, rows, watermark=1757700000):
+        self._rows = rows
+        self._watermark = watermark
+        self.query = None
+
+    async def fetch(self, query, *args):
+        self.query = query
+        return self._rows
+
+    async def fetchval(self, query, *args):
+        return self._watermark
+
+
+def test_fetch_system_kills_aligns_and_defaults(monkeypatch):
+    rows = [
+        {"solar_system_id": 30000142, "kill_count": 100},
+        {"solar_system_id": 30002187, "kill_count": 3},
+    ]
+    fake = _FakeDbFetch(rows)
+    monkeypatch.setattr(queries, "db", fake)
+    result = asyncio.run(queries.fetch_system_kills())
+
+    assert result.system_ids == [30000142, 30002187]
+    assert result.kills == [100, 3]
+    assert len(result.kills) == len(result.system_ids)
+    assert result.computed_at == 1757700000
+
+    q = fake.query
+    assert "FROM mv_kills_per_system" in q
+    assert "ORDER BY" in q.upper()
+
+
+def test_fetch_raw_kills_full_orders_by_real_column(monkeypatch):
+    fake = _FakeDbFetch([])
+    monkeypatch.setattr(queries, "db", fake)
+    asyncio.run(queries.fetch_raw_kills(30000142))
+    assert "ORDER BY kills.killmail_time DESC" in fake.query
+
+
+def test_fetch_raw_kills_since_is_unordered(monkeypatch):
+    fake = _FakeDbFetch([])
+    monkeypatch.setattr(queries, "db", fake)
+    asyncio.run(queries.fetch_raw_kills(30000142, since=1700000000))
+    assert "ORDER BY" not in fake.query
+    assert "inserted_time > $2" in fake.query
+
+
+def test_fetch_rollup_watermark_reads_the_shared_row(monkeypatch):
+    fake = _FakeDbCapture(1757700000)
+    monkeypatch.setattr(queries, "db", fake)
+    assert asyncio.run(queries.fetch_rollup_watermark()) == 1757700000
+    assert "FROM rollup_state" in fake.query
+    assert "FLOOR(EXTRACT(EPOCH FROM watermark))" in fake.query
+    assert fake.args == (queries.ROLLUP_WATERMARK_NAME,)
+    assert queries.ROLLUP_WATERMARK_NAME == "entity_kills_daily"
+
+
+def test_fetch_rollup_watermark_none_before_backfill(monkeypatch):
+    monkeypatch.setattr(queries, "db", _FakeDbCapture(None))
+    assert asyncio.run(queries.fetch_rollup_watermark()) is None
+
+
+def test_fetch_system_kills_omits_computed_at_without_watermark(monkeypatch):
+    monkeypatch.setattr(queries, "db", _FakeDbFetch([], watermark=None))
+    result = asyncio.run(queries.fetch_system_kills())
+    assert result.computed_at is None
+    assert "computed_at" not in result.model_dump_json(exclude_none=True)

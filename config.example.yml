@@ -1,0 +1,91 @@
+logging:
+  level: INFO
+  max_bytes: 10485760
+  backup_count: 5
+  # file: backend.log
+
+cors:
+  allow_origins:
+    - http://127.0.0.1:3000
+    - http://localhost:3000
+  allow_methods:
+    - GET
+    - POST
+  allow_headers:
+    - "*"
+  expose_headers:
+    - X-Kills-Fresh-To
+
+database:
+  pool_min_size: 5
+  pool_max_size: 20
+  connect_max_retry_seconds: 60
+  connect_retry_max_delay_seconds: 10
+
+cache:
+  query_ttl: 300
+  binary_ttl: 300
+  type_name_ttl: 2592000
+  esi_corp_ttl: 86400
+  esi_alliance_ttl: 86400
+  esi_sov_fallback_ttl: 3600
+  rankings_ttl: 3600
+  sov_ttl: 3600
+  farthest_kill_ttl: 21600
+  kill_detail_ttl: 604800
+  kill_detail_processed_ttl: 3600
+  system_latest_ttl: 10
+  filtered_map_ttl: 1800
+  filtered_system_ttl: 15
+  autocomplete_ttl: 60
+  war_search_ttl: 60
+  war_details_ttl: 21600
+  esi_sov_structures_fallback_ttl: 3600
+  sov_map_ttl: 3600
+  esi_system_jumps_fallback_ttl: 3600
+  esi_status_fallback_ttl: 30
+  system_jumps_ttl: 3600
+  system_jumps_max_age: 900
+  esi_retry_initial_seconds: 30
+  esi_retry_max_seconds: 600
+  sov_max_age: 900
+  status_max_age: 15
+  farthest_kill_max_age: 3600
+  system_activity_ttl: 300
+  warm_on_signal: true
+
+cache_redis:
+  max_connections: 200
+  pool_timeout: 5
+  socket_connect_timeout: 5
+  socket_timeout: 10
+  socket_keepalive: true
+  health_check_interval: 30
+
+streaming:
+  stream_name: kills:live
+  pubsub_channel: kills:enriched
+  invalidate_channel: cache:invalidate
+
+health:
+  heartbeat_interval: 10
+  heartbeat_ttl: 30
+  # expected_workers: 4
+
+limits:
+  max_killmail_ids: 100
+  max_name_ids: 100
+  max_ws_connections: 1000
+  max_filter_conditions: 8
+  max_filter_ids_per_condition: 50
+  autocomplete_min_length: 3
+  max_war_results: 500
+  max_war_ids: 200
+  encode_offload_min_rows: 2000
+  system_rankings_default_limit: 10
+  leaderboards_default_limit: 10
+  global_kills_default_bins: 300
+  system_activity_default_bins: 48
+
+metrics:
+  enabled: false

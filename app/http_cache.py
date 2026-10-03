@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import hashlib
+
+from fastapi.responses import Response
+
+
+def compute_etag(body: bytes) -> str:
+    return '"' + hashlib.md5(body).hexdigest() + '"'
+
+
+def _opaque_tag(tag: str) -> str:
+    tag = tag.strip()
+    return tag[2:] if tag.startswith("W/") else tag
+
+
+def not_modified(if_none_match: str | None, etag: str) -> bool:
+    if if_none_match is None:
+        return False
+    candidates = if_none_match.split(",")
+    if any(c.strip() == "*" for c in candidates):
+        return True
+    target = _opaque_tag(etag)
+    return any(_opaque_tag(c) == target for c in candidates)
+
+
+# GZipMiddleware adds its own Vary for uncompressed bodies, avoid duplicates
+def json_cache_response(
+    body: bytes,
+    gzipped: bool,
+    etag: str,
+    max_age: int,
+    if_none_match: str | None,
+    *,
+    revalidate: bool = False,
+) -> Response:
+    cache_control = "public, no-cache" if revalidate else f"public, max-age={max_age}"
+    headers = {
+        "ETag": etag,
+        "Cache-Control": cache_control,
+    }
+    if gzipped:
+        headers["Vary"] = "Accept-Encoding"
+    if not_modified(if_none_match, etag):
+        return Response(status_code=304, headers=headers)
+    if gzipped:
+        headers["Content-Encoding"] = "gzip"
+    return Response(content=body, media_type="application/json", headers=headers)
+
+
+def binary_cache_response(
+    body: bytes,
+    gzipped: bool,
+    max_age: int,
+    fresh_to: int,
+) -> Response:
+    headers = {
+        "Cache-Control": f"public, max-age={max_age}",
+        "X-Kills-Fresh-To": str(fresh_to),
+    }
+    if gzipped:
+        headers["Vary"] = "Accept-Encoding"
+        headers["Content-Encoding"] = "gzip"
+    return Response(
+        content=body, media_type="application/octet-stream", headers=headers
+    )

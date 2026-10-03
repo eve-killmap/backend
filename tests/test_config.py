@@ -1,0 +1,451 @@
+import logging
+from pathlib import Path
+
+import pytest
+
+from app.config import (
+    UVICORN_LOGGER_NAMES,
+    ConfigError,
+    configure_uvicorn_loggers,
+    load_config,
+    require_database_url,
+    setup_logging,
+    worker_log_file,
+)
+
+
+@pytest.fixture
+def restore_logging():
+    root = logging.getLogger()
+    saved_root = (root.level, root.handlers[:])
+    saved_uv = {
+        name: (
+            logging.getLogger(name).level,
+            logging.getLogger(name).handlers[:],
+            logging.getLogger(name).propagate,
+        )
+        for name in UVICORN_LOGGER_NAMES
+    }
+    yield
+    root.setLevel(saved_root[0])
+    root.handlers = saved_root[1]
+    for name, (level, handlers, propagate) in saved_uv.items():
+        log = logging.getLogger(name)
+        log.setLevel(level)
+        log.handlers = handlers
+        log.propagate = propagate
+
+
+def _write_yaml(tmp_path: Path, text: str) -> Path:
+    p = tmp_path / "config.yml"
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def test_worker_log_file_unchanged_without_id():
+    p = Path("/var/log/backend.log")
+    assert worker_log_file(p, None) == p
+    assert worker_log_file(p, "") == p
+
+
+def test_worker_log_file_inserts_id():
+    assert worker_log_file(Path("/var/log/backend.log"), "2") == Path(
+        "/var/log/backend.worker-2.log"
+    )
+
+
+def test_worker_id_derives_per_worker_file(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"WORKER_ID": "3", "LOG_FILE": "backend.log"},
+        base_dir=tmp_path,
+    )
+    assert cfg.worker_id == "3"
+    assert cfg.logging.file == tmp_path / "backend.worker-3.log"
+
+
+def test_no_worker_id_by_default(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.worker_id is None
+    assert cfg.logging.file == tmp_path / "backend.log"
+
+
+def test_defaults_reproduce_behavior(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.logging.level == "INFO"
+    assert cfg.database.pool_min_size == 5
+    assert cfg.database.pool_max_size == 20
+    assert cfg.cache.query_ttl == 300
+    assert cfg.cache.binary_ttl == 300
+    assert cfg.streaming.stream_name == "kills:live"
+    assert cfg.streaming.invalidate_channel == "cache:invalidate"
+    assert cfg.limits.max_killmail_ids == 100
+    assert cfg.health.expected_workers is None
+    assert cfg.database_url is None
+    assert cfg.redis_url is None
+    assert "magicmq" not in cfg.user_agent
+    assert cfg.cache.esi_sov_structures_fallback_ttl == 3600
+    assert cfg.cache.sov_map_ttl == 3600
+
+
+def test_env_overrides_yaml(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "logging:\n  level: WARNING\n")
+    cfg = load_config(
+        yaml_path=yaml_path, env={"LOG_LEVEL": "debug"}, base_dir=tmp_path
+    )
+    assert cfg.logging.level == "DEBUG"
+
+
+def test_yaml_overrides_default(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "database:\n  pool_max_size: 50\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.database.pool_max_size == 50
+
+
+def test_invalid_log_level_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(
+            yaml_path=tmp_path / "x.yml", env={"LOG_LEVEL": "BOGUS"}, base_dir=tmp_path
+        )
+
+
+def test_non_integer_pool_size_raises(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "database:\n  pool_min_size: notanint\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_sov_ttls_reject_zero(tmp_path):
+    for key in ("esi_sov_structures_fallback_ttl", "sov_map_ttl"):
+        yaml_path = _write_yaml(tmp_path, f"cache:\n  {key}: 0\n")
+        with pytest.raises(ConfigError):
+            load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_pool_max_below_min_raises(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path, "database:\n  pool_min_size: 10\n  pool_max_size: 5\n"
+    )
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_section_must_be_mapping(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "logging: not-a-mapping\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_cors_parsed_as_list(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path,
+        "cors:\n  allow_origins:\n    - https://a.example\n    - https://b.example\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.cors.allow_origins == ["https://a.example", "https://b.example"]
+
+
+def test_cors_comma_string_parsed_as_list(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path, "cors:\n  allow_origins: 'https://a.example, https://b.example'\n"
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.cors.allow_origins == ["https://a.example", "https://b.example"]
+
+
+def test_configure_uvicorn_loggers_applies_level(restore_logging):
+    access = logging.getLogger("uvicorn.access")
+    access.setLevel(logging.INFO)
+    access.handlers = [logging.NullHandler()]
+    access.propagate = False
+
+    configure_uvicorn_loggers("WARNING")
+
+    assert access.handlers == []
+    assert access.propagate is True
+    assert access.level == logging.WARNING
+    assert access.isEnabledFor(logging.INFO) is False
+    assert access.isEnabledFor(logging.WARNING) is True
+
+
+def test_configure_uvicorn_loggers_covers_all_uvicorn_loggers(restore_logging):
+    configure_uvicorn_loggers("ERROR")
+    for name in UVICORN_LOGGER_NAMES:
+        log = logging.getLogger(name)
+        assert log.level == logging.ERROR, name
+        assert log.propagate is True, name
+        assert log.handlers == [], name
+
+
+def test_configure_uvicorn_loggers_debug_still_allows_info(restore_logging):
+    configure_uvicorn_loggers("DEBUG")
+    assert logging.getLogger("uvicorn.access").isEnabledFor(logging.INFO) is True
+
+
+def test_setup_logging_applies_level_to_handlers_and_uvicorn(tmp_path, restore_logging):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"LOG_LEVEL": "WARNING", "LOG_FILE": "app.log"},
+        base_dir=tmp_path,
+    )
+    setup_logging(cfg)
+
+    root = logging.getLogger()
+    assert root.level == logging.WARNING
+    assert root.handlers, "expected file + console handlers"
+    assert all(h.level == logging.WARNING for h in root.handlers)
+    assert logging.getLogger("uvicorn.access").isEnabledFor(logging.INFO) is False
+
+
+def test_cors_expose_headers_default(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.cors.expose_headers == ["X-Kills-Fresh-To"]
+
+
+def test_cors_expose_headers_override(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path, "cors:\n  expose_headers:\n    - X-Foo\n    - X-Bar\n"
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.cors.expose_headers == ["X-Foo", "X-Bar"]
+
+
+def test_log_file_relative_resolves_against_base_dir(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml", env={"LOG_FILE": "sub/app.log"}, base_dir=tmp_path
+    )
+    assert cfg.logging.file == tmp_path / "sub" / "app.log"
+
+
+def test_require_database_url(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    with pytest.raises(ConfigError):
+        require_database_url(cfg)
+    cfg2 = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"DATABASE_URL": "postgresql://u:p@h/d"},
+        base_dir=tmp_path,
+    )
+    assert require_database_url(cfg2) == "postgresql://u:p@h/d"
+
+
+def test_metrics_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.metrics.enabled is False
+    assert cfg.metrics.host == "127.0.0.1"
+    assert cfg.metrics.port == 9109
+
+
+def test_metrics_port_env_override(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml", env={"METRICS_PORT": "9101"}, base_dir=tmp_path
+    )
+    assert cfg.metrics.port == 9101
+
+
+def test_metrics_port_yaml_ignored(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "metrics:\n  port: 9200\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.metrics.port == 9109
+
+
+def test_metrics_host_env_override(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"METRICS_HOST": "10.0.0.9"},
+        base_dir=tmp_path,
+    )
+    assert cfg.metrics.host == "10.0.0.9"
+
+
+def test_metrics_enabled_from_yaml_but_host_ignored(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "metrics:\n  enabled: true\n  host: 10.0.0.5\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.metrics.enabled is True
+    assert cfg.metrics.host == "127.0.0.1"
+
+
+def test_metrics_port_invalid_env_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(
+            yaml_path=tmp_path / "x.yml",
+            env={"METRICS_PORT": "not-a-port"},
+            base_dir=tmp_path,
+        )
+
+
+def test_metrics_port_out_of_range_raises(tmp_path):
+    with pytest.raises(ConfigError):
+        load_config(
+            yaml_path=tmp_path / "x.yml",
+            env={"METRICS_PORT": "70000"},
+            base_dir=tmp_path,
+        )
+
+
+def test_metrics_enabled_not_bool_raises(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "metrics:\n  enabled: yes-please\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_leader_election_defaults_true(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.leader_election is True
+
+
+def test_leader_election_false(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"LEADER_ELECTION": "False"},
+        base_dir=tmp_path,
+    )
+    assert cfg.leader_election is False
+
+
+def test_leader_election_true_explicit(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"LEADER_ELECTION": "True"},
+        base_dir=tmp_path,
+    )
+    assert cfg.leader_election is True
+
+
+def test_cache_redis_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    cr = cfg.cache_redis
+    assert cr.max_connections == 200
+    assert cr.pool_timeout == 5
+    assert cr.socket_connect_timeout == 5
+    assert cr.socket_timeout == 10
+    assert cr.socket_keepalive is True
+    assert cr.health_check_interval == 30
+
+
+def test_cache_redis_overrides(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path,
+        "cache_redis:\n  max_connections: 500\n  pool_timeout: 3\n"
+        "  socket_keepalive: false\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.cache_redis.max_connections == 500
+    assert cfg.cache_redis.pool_timeout == 3
+    assert cfg.cache_redis.socket_keepalive is False
+
+
+def test_cache_redis_keepalive_not_bool_raises(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "cache_redis:\n  socket_keepalive: maybe\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_cache_redis_bad_int_raises(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "cache_redis:\n  max_connections: 0\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_filter_limits_have_defaults():
+    from app.config import load_config
+
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.limits.max_filter_conditions == 8
+    assert cfg.limits.max_filter_ids_per_condition == 50
+
+
+def test_filtered_map_ttl_default():
+    from app.config import load_config
+
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.cache.filtered_map_ttl == 1800
+
+
+def test_filtered_system_ttl_default():
+    from app.config import load_config
+
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.cache.filtered_system_ttl == 15
+
+
+def test_autocomplete_config_defaults():
+    from app.config import load_config
+
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.limits.autocomplete_min_length == 3
+    assert cfg.cache.autocomplete_ttl == 60
+
+
+def test_war_config_defaults():
+    from app.config import load_config
+
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.limits.max_war_results == 500
+    assert cfg.cache.war_search_ttl == 60
+    assert cfg.cache.war_details_ttl == 21600
+    assert cfg.limits.max_war_ids == 200
+    assert cfg.limits.encode_offload_min_rows == 2000
+
+
+def test_time_window_defaults():
+    from app.config import load_config
+
+    cfg = load_config(yaml_path=Path("does-not-exist.yml"), env={})
+    assert cfg.limits.system_rankings_default_limit == 10
+    assert cfg.limits.global_kills_default_bins == 300
+    assert cfg.cache.warm_on_signal is True
+
+
+def test_esi_feed_and_jumps_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.cache.esi_system_jumps_fallback_ttl == 3600
+    assert cfg.cache.esi_status_fallback_ttl == 30
+    assert cfg.cache.system_jumps_ttl == 3600
+    assert cfg.cache.system_jumps_max_age == 900
+    assert cfg.cache.status_max_age == 15
+    assert cfg.cache.esi_retry_initial_seconds == 30
+    assert cfg.cache.esi_retry_max_seconds == 600
+
+
+def test_system_activity_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.cache.system_activity_ttl == 300
+    assert cfg.limits.system_activity_default_bins == 48
+
+
+def test_system_activity_knobs_from_yaml(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path,
+        "cache:\n  system_activity_ttl: 600\nlimits:\n  system_activity_default_bins: 24\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.cache.system_activity_ttl == 600
+    assert cfg.limits.system_activity_default_bins == 24
+
+
+def test_esi_feed_knobs_from_yaml(tmp_path):
+    yaml_path = _write_yaml(
+        tmp_path,
+        "cache:\n  esi_status_fallback_ttl: 45\n  esi_retry_max_seconds: 120\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.cache.esi_status_fallback_ttl == 45
+    assert cfg.cache.esi_retry_max_seconds == 120
+
+
+def test_leaderboards_default_limit_default(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.limits.leaderboards_default_limit == 10
+
+
+def test_leaderboards_default_limit_from_yaml_and_bounds(tmp_path):
+    yaml_path = _write_yaml(tmp_path, "limits:\n  leaderboards_default_limit: 25\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.limits.leaderboards_default_limit == 25
+    for bad in (0, 51):
+        yaml_path = _write_yaml(
+            tmp_path, f"limits:\n  leaderboards_default_limit: {bad}\n"
+        )
+        with pytest.raises(ConfigError):
+            load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)

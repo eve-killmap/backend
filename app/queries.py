@@ -1,0 +1,476 @@
+import asyncio
+import time
+from datetime import date, datetime, timezone
+from typing import Any
+
+import redis.asyncio as aioredis
+
+from app.config import config
+from app.database import db
+from app.schema import RawKillsColumns
+from app import prometheus_metrics as pm
+from app.models import (
+    RawKillDetailResponse,
+    Attacker,
+    Victim,
+    KillDetail,
+    RankSystem,
+    TopSystems,
+    SystemKillsResponse,
+)
+
+_redis: aioredis.Redis | None = None
+
+
+def set_redis(redis_client: aioredis.Redis) -> None:
+    global _redis
+    _redis = redis_client
+
+
+_TOP_INTERVALS = {
+    "day": "1 day",
+    "week": "7 days",
+    "month": "30 days",
+    "six_months": "6 months",
+    "year": "1 year",
+}
+
+ROLLUP_WATERMARK_NAME = "entity_kills_daily"
+
+
+async def fetch_rollup_watermark() -> int | None:
+    return await db.fetchval(
+        "SELECT FLOOR(EXTRACT(EPOCH FROM watermark))::BIGINT "
+        "FROM rollup_state WHERE name = $1",
+        ROLLUP_WATERMARK_NAME,
+    )
+
+
+async def fetch_kills_by_ids(killmail_ids: list[int]) -> RawKillDetailResponse:
+    if not killmail_ids:
+        return RawKillDetailResponse(count=0, kills=[])
+
+    query = """
+        SELECT
+            k.killmail_id,
+            k.killmail_time,
+            k.position_x,
+            k.position_y,
+            k.position_z,
+            k.victim_character_id,
+            k.victim_corporation_id,
+            k.victim_alliance_id,
+            k.victim_faction_id,
+            k.victim_damage_taken,
+            k.victim_ship_type_id,
+            k.war_id,
+            k.inserted_time,
+            z.fitted_value,
+            z.dropped_value,
+            z.destroyed_value,
+            z.total_value,
+            z.total_droppable_value,
+            z.npc,
+            z.solo,
+            z.awox,
+            z.labels
+        FROM kills k
+        LEFT JOIN zkb_metadata z ON z.killmail_id = k.killmail_id
+        WHERE k.killmail_id = ANY($1)
+    """
+    kill_rows = await db.fetch(query, killmail_ids)
+
+    if kill_rows:
+        attacker_query = """
+            SELECT
+                killmail_id,
+                character_id,
+                corporation_id,
+                alliance_id,
+                faction_id,
+                ship_type_id,
+                weapon_type_id,
+                damage_done,
+                final_blow,
+                security_status
+            FROM kill_attackers
+            WHERE killmail_id = ANY($1)
+            ORDER BY killmail_id, attacker_index
+        """
+        attacker_rows = await db.fetch(attacker_query, killmail_ids)
+
+        attackers_by_kill: dict[int, list[Attacker]] = {}
+        for row in attacker_rows:
+            kill_id = row["killmail_id"]
+            if kill_id not in attackers_by_kill:
+                attackers_by_kill[kill_id] = []
+            attackers_by_kill[kill_id].append(
+                Attacker(
+                    character_id=row["character_id"],
+                    corporation_id=row["corporation_id"],
+                    alliance_id=row["alliance_id"],
+                    faction_id=row["faction_id"],
+                    ship_type_id=row["ship_type_id"],
+                    weapon_type_id=row["weapon_type_id"],
+                    damage_done=row["damage_done"],
+                    final_blow=row["final_blow"],
+                    security_status=row["security_status"],
+                )
+            )
+    else:
+        attackers_by_kill = {}
+
+    kills = [
+        KillDetail(
+            killmail_id=row["killmail_id"],
+            killmail_time=row["killmail_time"],
+            position=(row["position_x"], row["position_y"], row["position_z"]),
+            war_id=row["war_id"],
+            victim=Victim(
+                character_id=row["victim_character_id"],
+                corporation_id=row["victim_corporation_id"],
+                alliance_id=row["victim_alliance_id"],
+                faction_id=row["victim_faction_id"],
+                damage_taken=row["victim_damage_taken"],
+                ship_type_id=row["victim_ship_type_id"],
+            ),
+            attackers=attackers_by_kill.get(row["killmail_id"], []),
+            inserted_time=row["inserted_time"],
+            fitted_value=row["fitted_value"],
+            dropped_value=row["dropped_value"],
+            destroyed_value=row["destroyed_value"],
+            total_value=row["total_value"],
+            total_droppable_value=row["total_droppable_value"],
+            npc=row["npc"],
+            solo=row["solo"],
+            awox=row["awox"],
+            labels=row["labels"],
+        )
+        for row in kill_rows
+    ]
+
+    return RawKillDetailResponse(
+        count=len(kills),
+        kills=kills,
+    )
+
+
+async def fetch_system_latest_inserted(solar_system_id: int) -> int | None:
+    # FLOOR, not ::BIGINT (which rounds): fresh_to must never pass the true max
+    return await db.fetchval(
+        "SELECT FLOOR(EXTRACT(EPOCH FROM MAX(inserted_time)))::BIGINT FROM kills WHERE solar_system_id = $1",
+        solar_system_id,
+    )
+
+
+async def fetch_raw_kills(
+    solar_system_id: int,
+    since: int | None = None,
+) -> RawKillsColumns:
+    conditions = ["solar_system_id = $1"]
+    params: list[Any] = [solar_system_id]
+
+    if since is not None:
+        conditions.append("inserted_time > $2")
+        params.append(datetime.fromtimestamp(since, tz=timezone.utc))
+
+    where_clause = " AND ".join(conditions)
+
+    order_clause = "ORDER BY kills.killmail_time DESC" if since is None else ""
+
+    query = f"""
+        SELECT
+            killmail_id,
+            position_x,
+            position_y,
+            position_z,
+            EXTRACT(EPOCH FROM killmail_time)::BIGINT as killmail_time,
+            victim_ship_type_id
+        FROM kills
+        WHERE {where_clause}
+        {order_clause}
+    """
+
+    kill_rows = await db.fetch(query, *params)
+
+    killmail_ids: list[int] = []
+    x_list: list[float] = []
+    y_list: list[float] = []
+    z_list: list[float] = []
+    killmail_time_list: list[int] = []
+    ship_type_list: list[int] = []
+
+    for row in kill_rows:
+        killmail_ids.append(row["killmail_id"])
+        x_list.append(row["position_x"])
+        y_list.append(row["position_y"])
+        z_list.append(row["position_z"])
+        killmail_time_list.append(row["killmail_time"])
+        ship_type_list.append(row["victim_ship_type_id"])
+
+    return {
+        "count": len(killmail_ids),
+        "killmail_ids": killmail_ids,
+        "x": x_list,
+        "y": y_list,
+        "z": z_list,
+        "killmail_times": killmail_time_list,
+        "ship_types": ship_type_list,
+    }
+
+
+async def fetch_top_systems(limit: int = 10) -> TopSystems:
+    async def _all():
+        return await db.fetch(
+            "SELECT solar_system_id, kill_count FROM mv_kills_per_system "
+            "ORDER BY kill_count DESC, solar_system_id LIMIT $1",
+            limit,
+        )
+
+    async def _interval(iv: str):
+        # iv comes only from _TOP_INTERVALS, never from user input
+        return await db.fetch(
+            "SELECT solar_system_id, SUM(kill_count) AS kill_count "
+            "FROM system_kills_daily "
+            f"WHERE day > CURRENT_DATE - INTERVAL '{iv}' "
+            "GROUP BY solar_system_id ORDER BY kill_count DESC, solar_system_id LIMIT $1",
+            limit,
+        )
+
+    def _rank(rows):
+        return [
+            RankSystem(solar_system_id=r["solar_system_id"], kill_count=r["kill_count"])
+            for r in rows
+        ]
+
+    all_rows = _rank(await _all())
+    by_key = {k: _rank(await _interval(iv)) for k, iv in _TOP_INTERVALS.items()}
+
+    return TopSystems(
+        all=all_rows,
+        day=by_key["day"],
+        week=by_key["week"],
+        month=by_key["month"],
+        six_months=by_key["six_months"],
+        year=by_key["year"],
+    )
+
+
+async def fetch_system_kills(
+    start: date | None = None, end: date | None = None
+) -> SystemKillsResponse:
+    if start is None and end is None:
+        query = (
+            "SELECT solar_system_id, kill_count FROM mv_kills_per_system "
+            "ORDER BY solar_system_id"
+        )
+        args: list = []
+    else:
+        conds, args = [], []
+        if start is not None:
+            args.append(start)
+            conds.append(f"day >= ${len(args)}")
+        if end is not None:
+            args.append(end)
+            conds.append(f"day < ${len(args)}")
+        where = " AND ".join(conds)
+        query = (
+            "SELECT solar_system_id, SUM(kill_count) AS kill_count "
+            f"FROM system_kills_daily WHERE {where} "
+            "GROUP BY solar_system_id ORDER BY solar_system_id"
+        )
+    rows, computed_at = await asyncio.gather(
+        db.fetch(query, *args), fetch_rollup_watermark()
+    )
+    return SystemKillsResponse(
+        computed_at=computed_at,
+        system_ids=[r["solar_system_id"] for r in rows],
+        kills=[r["kill_count"] for r in rows],
+    )
+
+
+async def fetch_farthest_kill(solar_system_id: int) -> float | None:
+    query = """
+        SELECT
+            farthest_kill
+        FROM mv_farthest_kill_per_system
+        WHERE solar_system_id = $1
+    """
+    return await db.fetchval(query, solar_system_id)
+
+
+def normalize_farthest_kill(value: float | None) -> int:
+    if value is None:
+        return -1
+    return int(value)
+
+
+async def fetch_db_stats() -> dict:
+    row = await db.fetchrow("""
+        SELECT numbackends, xact_commit, xact_rollback, blks_read, blks_hit,
+               tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted,
+               deadlocks, temp_files,
+               EXTRACT(EPOCH FROM stats_reset)::BIGINT AS stats_reset_epoch
+        FROM pg_stat_database
+        WHERE datname = current_database()
+        """)
+    if row is None:
+        return {}
+    blks_hit = row["blks_hit"]
+    blks_read = row["blks_read"]
+    total_blks = blks_hit + blks_read
+    return {
+        "numbackends": row["numbackends"],
+        "xact_commit": row["xact_commit"],
+        "xact_rollback": row["xact_rollback"],
+        "blks_hit": blks_hit,
+        "blks_read": blks_read,
+        "cache_hit_ratio": round(blks_hit / total_blks, 4) if total_blks else None,
+        "tup_returned": row["tup_returned"],
+        "tup_fetched": row["tup_fetched"],
+        "tup_inserted": row["tup_inserted"],
+        "tup_updated": row["tup_updated"],
+        "tup_deleted": row["tup_deleted"],
+        "deadlocks": row["deadlocks"],
+        "temp_files": row["temp_files"],
+        "stats_reset_epoch": row["stats_reset_epoch"],
+    }
+
+
+async def fetch_domain_stats() -> dict:
+    row = await db.fetchrow("""
+        SELECT
+            (SELECT reltuples::BIGINT FROM pg_class WHERE relname = 'kills') AS total_kills_estimate,
+            (SELECT reltuples::BIGINT FROM pg_class WHERE relname = 'kills_no_positions') AS no_position_estimate,
+            (SELECT COUNT(*) FROM kills WHERE killmail_time >= NOW() - INTERVAL '1 hour') AS kills_1h,
+            (SELECT COUNT(*) FROM kills WHERE killmail_time >= NOW() - INTERVAL '24 hours') AS kills_24h,
+            (SELECT EXTRACT(EPOCH FROM MAX(killmail_time))::BIGINT FROM kills) AS latest_killmail_epoch,
+            pg_total_relation_size('kills') AS kills_bytes,
+            pg_total_relation_size('kill_attackers') AS attackers_bytes
+        """)
+    if row is None:
+        return {}
+    latest = row["latest_killmail_epoch"]
+    lag = int(time.time()) - latest if latest is not None else None
+    return {
+        "total_kills_estimate": row["total_kills_estimate"],
+        "no_position_estimate": row["no_position_estimate"],
+        "kills_last_1h": row["kills_1h"],
+        "kills_last_24h": row["kills_24h"],
+        "latest_killmail_epoch": latest,
+        "ingestion_lag_seconds": lag,
+        "kills_table_bytes": row["kills_bytes"],
+        "attackers_table_bytes": row["attackers_bytes"],
+    }
+
+
+async def fetch_top_statements(limit: int = 5) -> list[dict]:
+    try:
+        rows = await db.fetch(
+            """
+            SELECT query, calls, total_exec_time, mean_exec_time, rows
+            FROM pg_stat_statements
+            ORDER BY total_exec_time DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    except Exception:
+        return []
+    return [
+        {
+            "query": r["query"][:200],
+            "calls": r["calls"],
+            "total_exec_time_ms": round(r["total_exec_time"], 2),
+            "mean_exec_time_ms": round(r["mean_exec_time"], 2),
+            "rows": r["rows"],
+        }
+        for r in rows
+    ]
+
+
+def merge_kill_details(found: list[KillDetail]) -> RawKillDetailResponse:
+    return RawKillDetailResponse(count=len(found), kills=found)
+
+
+async def get_kill_details_cached(killmail_ids: list[int]) -> RawKillDetailResponse:
+    if not killmail_ids:
+        return RawKillDetailResponse(count=0, kills=[])
+
+    found: list[KillDetail] = []
+    misses: list[int] = killmail_ids
+
+    if _redis is not None:
+        cached_values = await _redis.mget(
+            *[f"killdetail:{kid}" for kid in killmail_ids]
+        )
+        misses = []
+        for kid, raw in zip(killmail_ids, cached_values):
+            if raw is not None:
+                found.append(KillDetail.model_validate_json(raw))
+                pm.cache_hits.labels(cache="kill_details").inc()
+            else:
+                misses.append(kid)
+                pm.cache_misses.labels(cache="kill_details").inc()
+
+    if misses:
+        fetched = await fetch_kills_by_ids(misses)
+        if _redis is not None and fetched.kills:
+            pipe = _redis.pipeline()
+            for kill in fetched.kills:
+                pipe.set(
+                    f"killdetail:{kill.killmail_id}",
+                    kill.model_dump_json(),
+                    ex=config.cache.kill_detail_ttl,
+                )
+            await pipe.execute()
+        found.extend(fetched.kills)
+
+    return merge_kill_details(found)
+
+
+async def get_type_names(ids: set[int]) -> dict[int, str]:
+    if not ids:
+        return {}
+
+    result: dict[int, str] = {}
+    uncached: list[int] = []
+
+    if _redis is not None:
+        cached_values = await _redis.mget(
+            *[f"db:type_name:{type_id}" for type_id in ids]
+        )
+        for type_id, val in zip(ids, cached_values):
+            if val is not None:
+                result[type_id] = val.decode() if isinstance(val, bytes) else val
+                pm.cache_hits.labels(cache="type_name").inc()
+            else:
+                uncached.append(type_id)
+                pm.cache_misses.labels(cache="type_name").inc()
+    else:
+        uncached = list(ids)
+
+    if uncached:
+        rows = await db.fetch(
+            "SELECT id, name FROM types WHERE id = ANY($1::int[])",
+            uncached,
+        )
+        if _redis is not None:
+            pipe = _redis.pipeline()
+            for row in rows:
+                pipe.set(
+                    f"db:type_name:{row['id']}",
+                    row["name"],
+                    ex=config.cache.type_name_ttl,
+                )
+                result[row["id"]] = row["name"]
+            await pipe.execute()
+        else:
+            for row in rows:
+                result[row["id"]] = row["name"]
+
+    for type_id in ids:
+        pm.entity_lookups.labels(
+            kind="type", result="found" if type_id in result else "missing"
+        ).inc()
+    return result

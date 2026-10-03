@@ -1,0 +1,394 @@
+import asyncio
+import fnmatch
+import json
+
+import app.invalidation as invalidation
+import app.redis_client as rc
+from app.invalidation import patterns_for_targets
+
+
+def test_new_patterns_present():
+    from app.invalidation import INVALIDATION_PATTERNS
+
+    assert INVALIDATION_PATTERNS["system_kills"] == "query:v3:system_kills:*"
+    assert INVALIDATION_PATTERNS["global_kills"] == "query:v3:global_kills:*"
+    assert INVALIDATION_PATTERNS["leaderboards"] == "query:v3:leaderboards:*"
+
+
+def test_system_kills_pattern_excludes_filtered():
+    assert not fnmatch.fnmatch(
+        "query:v3:system_kills_filtered:abc", "query:v3:system_kills:*"
+    )
+    assert fnmatch.fnmatch("query:v3:system_kills:xyz", "query:v3:system_kills:*")
+
+
+def test_warmable_targets_set():
+    assert invalidation.WARMABLE_TARGETS == {
+        "system_rankings",
+        "system_kills",
+        "global_kills",
+        "leaderboards",
+    }
+
+
+def test_patterns_for_known_targets():
+    assert patterns_for_targets(["system_rankings"]) == ["query:v3:system_rankings:*"]
+    out = patterns_for_targets(["sov", "farthest_kill"])
+    assert set(out) == {"query:v3:sov:*", "query:v3:farthest_kill:*"}
+
+
+def test_patterns_ignores_unknown():
+    assert patterns_for_targets(["nope"]) == []
+
+
+def test_sov_and_sov_map_patterns_do_not_collide():
+    out = patterns_for_targets(["sov", "sov_map"])
+    assert set(out) == {"query:v3:sov:*", "query:v3:sov_map:*"}
+
+    def matches(pattern, key):
+        prefix = pattern[:-1] if pattern.endswith("*") else pattern
+        return key.startswith(prefix)
+
+    assert not matches("query:v3:sov:*", "query:v3:sov_map:abc123")
+    assert not matches("query:v3:sov_map:*", "query:v3:sov:abc123")
+    assert matches("query:v3:sov_map:*", "query:v3:sov_map:abc123")
+    assert matches("query:v3:sov:*", "query:v3:sov:abc123")
+
+
+class _FakePubSub:
+    def __init__(self, messages):
+        self._messages = messages
+        self.subscribed = None
+        self.unsubscribed = None
+        self.closed = False
+
+    async def subscribe(self, channel):
+        self.subscribed = channel
+
+    async def listen(self):
+        for m in self._messages:
+            yield m
+
+    async def unsubscribe(self, channel):
+        self.unsubscribed = channel
+
+    async def aclose(self):
+        self.closed = True
+
+
+class _FakeBus:
+    def __init__(self, pubsub):
+        self._pubsub = pubsub
+
+    def pubsub(self):
+        return self._pubsub
+
+
+class _FakeCache:
+    def __init__(self, keys):
+        self._keys = list(keys)
+        self.deleted: list[str] = []
+
+    async def scan_iter(self, match=None, count=None):
+        prefix = match[:-1] if match and match.endswith("*") else match
+        for key in self._keys:
+            if prefix is None or key.startswith(prefix):
+                yield key
+
+    async def delete(self, *keys):
+        self.deleted.extend(keys)
+        return len(keys)
+
+
+def test_subscriber_subscribes_on_bus_and_deletes_on_cache():
+    msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
+    pubsub = _FakePubSub([{"type": "subscribe"}, msg])
+    bus = _FakeBus(pubsub)
+    cache = _FakeCache(
+        ["query:v3:sov:abc", "query:v3:sov:def", "query:v3:system_rankings:x"]
+    )
+
+    asyncio.run(
+        invalidation.subscriber_loop(bus, cache, "cache:invalidate", rc.broadcaster)
+    )
+
+    assert pubsub.subscribed == "cache:invalidate"
+    assert set(cache.deleted) == {"query:v3:sov:abc", "query:v3:sov:def"}
+    assert pubsub.unsubscribed == "cache:invalidate"
+    assert pubsub.closed is True
+
+
+def test_subscriber_ignores_unknown_targets():
+    msg = {"type": "message", "data": json.dumps({"targets": ["bogus"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:sov:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == []
+
+
+def test_subscriber_skips_malformed_message():
+    bad = {"type": "message", "data": "not json{"}
+    pubsub = _FakePubSub([bad])
+    cache = _FakeCache(["query:v3:sov:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == []
+    assert pubsub.closed is True
+
+
+import app.prometheus_metrics as pm  # noqa: E402
+from prometheus_client import REGISTRY  # noqa: E402
+
+
+def _sample(name, labels=None):
+    return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+def test_subscriber_records_received_and_evicted_metrics():
+    msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:sov:a", "query:v3:sov:b"])
+
+    r0 = _sample("eve_killmap_cache_invalidations_received_total", {"target": "sov"})
+    e0 = _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"})
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert (
+        _sample("eve_killmap_cache_invalidations_received_total", {"target": "sov"})
+        - r0
+        == 1
+    )
+    assert _sample("eve_killmap_cache_keys_evicted_total", {"target": "sov"}) - e0 == 2
+
+
+def test_broadcaster_is_leader_property_reflects_internal_flag(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    assert rc.broadcaster.is_leader is True
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
+    assert rc.broadcaster.is_leader is False
+
+
+def test_non_leader_skips_warmable_target(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:system_kills:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == []
+
+
+def test_leader_flushes_warmable_target(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:system_kills:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == ["query:v3:system_kills:abc"]
+
+
+def test_non_warmable_target_flushed_regardless_of_leadership(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
+    msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:sov:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == ["query:v3:sov:abc"]
+
+
+def test_warmable_target_pattern_does_not_match_filtered_key(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(
+        ["query:v3:system_kills:abc", "query:v3:system_kills_filtered:def"]
+    )
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == ["query:v3:system_kills:abc"]
+
+
+def test_leader_warms_once_per_message_after_warmable_flush(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {
+        "type": "message",
+        "data": json.dumps({"targets": ["system_kills", "system_rankings"]}),
+    }
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:system_kills:abc", "query:v3:system_rankings:def"])
+    warm_calls = []
+
+    async def fake_warm():
+        warm_calls.append(1)
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=fake_warm
+        )
+    )
+
+    assert warm_calls == [1]
+
+
+def test_non_leader_never_calls_warm(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:system_kills:abc"])
+    warm_calls = []
+
+    async def fake_warm():
+        warm_calls.append(1)
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=fake_warm
+        )
+    )
+
+    assert warm_calls == []
+
+
+def test_non_warmable_target_does_not_trigger_warm(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["sov"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:sov:abc"])
+    warm_calls = []
+
+    async def fake_warm():
+        warm_calls.append(1)
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=fake_warm
+        )
+    )
+
+    assert warm_calls == []
+
+
+def test_warm_callback_failure_does_not_crash_subscriber(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:system_kills:abc"])
+
+    async def broken_warm():
+        raise RuntimeError("boom")
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub),
+            cache,
+            "cache:invalidate",
+            rc.broadcaster,
+            warm=broken_warm,
+        )
+    )
+
+    assert cache.deleted == ["query:v3:system_kills:abc"]
+    assert pubsub.closed is True
+
+
+def test_warm_default_none_is_never_called(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["system_kills"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:system_kills:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+
+    assert cache.deleted == ["query:v3:system_kills:abc"]
+
+
+def test_leader_flushes_leaderboards_and_warms(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", True)
+    msg = {"type": "message", "data": json.dumps({"targets": ["leaderboards"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:leaderboards:abc", "query:v3:system_rankings:x"])
+    warm_calls = []
+
+    async def fake_warm():
+        warm_calls.append(1)
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster, warm=fake_warm
+        )
+    )
+    assert cache.deleted == ["query:v3:leaderboards:abc"]
+    assert warm_calls == [1]
+
+
+def test_non_leader_skips_leaderboards(monkeypatch):
+    monkeypatch.setattr(rc.broadcaster, "_is_leader", False)
+    msg = {"type": "message", "data": json.dumps({"targets": ["leaderboards"]})}
+    pubsub = _FakePubSub([msg])
+    cache = _FakeCache(["query:v3:leaderboards:abc"])
+
+    asyncio.run(
+        invalidation.subscriber_loop(
+            _FakeBus(pubsub), cache, "cache:invalidate", rc.broadcaster
+        )
+    )
+    assert cache.deleted == []
+
+
+def test_invalidation_patterns_follow_the_query_key_version():
+    from app.cache import QUERY_KEY_VERSION
+
+    for target, pattern in invalidation.INVALIDATION_PATTERNS.items():
+        assert pattern == f"query:{QUERY_KEY_VERSION}:{target}:*"
+    assert set(invalidation.INVALIDATION_PATTERNS) == {
+        "system_rankings",
+        "system_kills",
+        "global_kills",
+        "farthest_kill",
+        "leaderboards",
+        "sov",
+        "sov_map",
+        "system_jumps",
+    }
